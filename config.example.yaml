@@ -1,0 +1,33 @@
+# Example configuration for street-viewer-360.
+# All values can be overridden by matching CLI options.
+
+default_zoom: 13
+output_dir: "./dist"
+recursive: true
+overwrite: false
+device: "auto"  # auto | cpu | cuda | mps
+
+anonymization:
+  enabled: true
+  blur_sigma: 15
+  detector: "yolov8"
+  confidence_threshold: 0.35
+  # Run `street-viewer-360 download-models --target ./models` first,
+  # then point these to the downloaded .pt files:
+  # face_model_path: ./models/yolov8n-face.pt
+  # plate_model_path: ./models/yolov11n-license-plate.pt
+  expand_box_ratio: 0.1
+
+metadata:
+  include_without_gps: false
+  timezone: "local"
+
+map_layers:
+  - name: "OpenStreetMap"
+    url: "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+    attribution: "(c) OpenStreetMap contributors"
+    default: true
+  - name: "Satellite"
+    url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+    attribution: "Tiles (c) Esri"
+    default: false

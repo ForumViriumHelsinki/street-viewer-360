@@ -1,0 +1,100 @@
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  color: #1a1a1a;
+  background: #f4f4f6;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  background: #1f2937;
+  color: #f9fafb;
+  flex: 0 0 auto;
+}
+
+.app-header h1 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.status {
+  font-size: 13px;
+  opacity: 0.85;
+}
+
+.app-main {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.map {
+  position: absolute;
+  inset: 0;
+}
+
+.viewer {
+  position: absolute;
+  inset: 0;
+  background: #000;
+  display: flex;
+  flex-direction: column;
+  z-index: 1000;
+}
+
+.viewer.hidden {
+  display: none;
+}
+
+.viewer-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 1100;
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  font-size: 24px;
+  cursor: pointer;
+}
+
+.viewer-close:hover {
+  background: rgba(0, 0, 0, 0.85);
+}
+
+.viewer-info {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 1100;
+  padding: 6px 10px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #f3f4f6;
+  font-size: 13px;
+  border-radius: 4px;
+  max-width: 60%;
+}
+
+.panorama {
+  position: absolute;
+  inset: 0;
+}
