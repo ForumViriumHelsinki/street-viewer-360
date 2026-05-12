@@ -11,6 +11,7 @@ import typer
 
 from street_viewer_360 import __version__
 from street_viewer_360.config import Device, load_config
+from street_viewer_360.frontend import write_frontend
 from street_viewer_360.generator import generate as run_generate
 
 logger = logging.getLogger(__name__)
@@ -169,6 +170,36 @@ def generate(
     if result.included == 0:
         logger.warning("No panoramas were included in the output.")
         sys.exit(5)
+
+
+@app.command("refresh-frontend")
+def refresh_frontend(
+    output_dir: Annotated[Path, typer.Option("--output", "-o", help="Existing package directory to refresh.")],
+    config_path: Annotated[
+        Path | None,
+        typer.Option("--config", "-c", help="Optional YAML configuration file."),
+    ] = None,
+    title: Annotated[
+        str,
+        typer.Option("--title", help="Title shown in the HTML header."),
+    ] = "Street Viewer 360",
+    log: Annotated[str, typer.Option("--log", help="Log level.")] = "INFO",
+) -> None:
+    """Rewrite index.html and assets/ in an existing package without re-processing images."""
+    setup_logging(log)
+
+    if not output_dir.exists() or not (output_dir / "metadata.json").exists():
+        logger.error("Output directory %s does not look like a generated package (missing metadata.json).", output_dir)
+        raise typer.Exit(code=2)
+
+    try:
+        cfg = load_config(config_path, overrides={"output_dir": output_dir, "overwrite": True})
+    except (FileNotFoundError, ValueError) as exc:
+        logger.error("Configuration error: %s", exc)
+        raise typer.Exit(code=2) from exc
+
+    write_frontend(output_dir, cfg, title=title)
+    typer.echo(f"Refreshed frontend in {output_dir}")
 
 
 @app.command("download-models")
