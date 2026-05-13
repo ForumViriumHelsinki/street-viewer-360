@@ -40,6 +40,15 @@ class AnonymizationConfig(BaseModel):
     nms_iou_threshold: float = 0.45
 
 
+class PathConfig(BaseModel):
+    """Map polyline segmentation thresholds."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    max_gap_meters: float = 50.0
+    max_gap_seconds: float = 10.0
+
+
 class MetadataConfig(BaseModel):
     """Metadata extraction settings."""
 
@@ -88,6 +97,7 @@ class AppConfig(BaseModel):
     device: Device = "auto"
     anonymization: AnonymizationConfig = Field(default_factory=AnonymizationConfig)
     metadata: MetadataConfig = Field(default_factory=MetadataConfig)
+    path: PathConfig = Field(default_factory=PathConfig)
     map_layers: list[MapLayer] = Field(default_factory=_default_map_layers)
 
 

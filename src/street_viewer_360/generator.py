@@ -262,6 +262,10 @@ def generate(
         "generated_at": datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z"),
         "default_zoom": config.default_zoom,
         "map_layers": [layer.model_dump() for layer in config.map_layers],
+        "path": {
+            "max_gap_meters": config.path.max_gap_meters,
+            "max_gap_seconds": config.path.max_gap_seconds,
+        },
         "panoramas": panoramas,
     }
 

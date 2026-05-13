@@ -104,6 +104,14 @@ def generate(
         bool,
         typer.Option("--no-anonymization", help="Skip anonymization regardless of config."),
     ] = False,
+    max_gap_meters: Annotated[
+        float | None,
+        typer.Option("--max-gap-meters", help="Break the map polyline between consecutive panoramas farther apart than this."),
+    ] = None,
+    max_gap_seconds: Annotated[
+        float | None,
+        typer.Option("--max-gap-seconds", help="Break the map polyline between consecutive panoramas with a larger time gap."),
+    ] = None,
     dry_run: Annotated[
         bool,
         typer.Option("--dry-run", help="Inspect inputs without writing output."),
@@ -135,6 +143,10 @@ def generate(
         cfg.anonymization.plate_model_path = plate_model
     if no_anonymization:
         cfg.anonymization.enabled = False
+    if max_gap_meters is not None:
+        cfg.path.max_gap_meters = max_gap_meters
+    if max_gap_seconds is not None:
+        cfg.path.max_gap_seconds = max_gap_seconds
 
     try:
         result = run_generate(input_dir, cfg, dry_run=dry_run)
@@ -183,12 +195,21 @@ def refresh_frontend(
         str,
         typer.Option("--title", help="Title shown in the HTML header."),
     ] = "Street Viewer 360",
+    max_gap_meters: Annotated[
+        float | None,
+        typer.Option("--max-gap-meters", help="Break the map polyline between consecutive panoramas farther apart than this."),
+    ] = None,
+    max_gap_seconds: Annotated[
+        float | None,
+        typer.Option("--max-gap-seconds", help="Break the map polyline between consecutive panoramas with a larger time gap."),
+    ] = None,
     log: Annotated[str, typer.Option("--log", help="Log level.")] = "INFO",
 ) -> None:
     """Rewrite index.html and assets/ in an existing package without re-processing images."""
     setup_logging(log)
 
-    if not output_dir.exists() or not (output_dir / "metadata.json").exists():
+    metadata_path = output_dir / "metadata.json"
+    if not output_dir.exists() or not metadata_path.exists():
         logger.error("Output directory %s does not look like a generated package (missing metadata.json).", output_dir)
         raise typer.Exit(code=2)
 
@@ -197,6 +218,20 @@ def refresh_frontend(
     except (FileNotFoundError, ValueError) as exc:
         logger.error("Configuration error: %s", exc)
         raise typer.Exit(code=2) from exc
+
+    if max_gap_meters is not None:
+        cfg.path.max_gap_meters = max_gap_meters
+    if max_gap_seconds is not None:
+        cfg.path.max_gap_seconds = max_gap_seconds
+
+    import json
+
+    metadata_doc = json.loads(metadata_path.read_text(encoding="utf-8"))
+    metadata_doc["path"] = {
+        "max_gap_meters": cfg.path.max_gap_meters,
+        "max_gap_seconds": cfg.path.max_gap_seconds,
+    }
+    metadata_path.write_text(json.dumps(metadata_doc, indent=2, ensure_ascii=False), encoding="utf-8")
 
     write_frontend(output_dir, cfg, title=title)
     typer.echo(f"Refreshed frontend in {output_dir}")

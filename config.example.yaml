@@ -22,6 +22,12 @@ metadata:
   include_without_gps: false
   timezone: "local"
 
+# Map polyline is broken between consecutive panoramas when either threshold
+# is exceeded. Time gap is ignored when one of the panoramas has no timestamp.
+path:
+  max_gap_meters: 50.0
+  max_gap_seconds: 10.0
+
 map_layers:
   - name: "OpenStreetMap"
     url: "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"

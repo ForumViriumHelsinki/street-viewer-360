@@ -146,6 +146,45 @@
     return withTs.concat(withoutTs).map(function (x) { return x.p; });
   }
 
+  function haversineMeters(a, b) {
+    var R = 6371000;
+    var toRad = function (d) { return d * Math.PI / 180; };
+    var dLat = toRad(b.lat - a.lat);
+    var dLon = toRad(b.lon - a.lon);
+    var lat1 = toRad(a.lat);
+    var lat2 = toRad(b.lat);
+    var h = Math.sin(dLat / 2) * Math.sin(dLat / 2)
+      + Math.sin(dLon / 2) * Math.sin(dLon / 2) * Math.cos(lat1) * Math.cos(lat2);
+    return 2 * R * Math.asin(Math.sqrt(h));
+  }
+
+  function buildPathSegments(panoramas, maxMeters, maxSeconds) {
+    // Walk consecutive panoramas; start a new segment whenever the distance
+    // exceeds maxMeters, or both timestamps exist and the time gap exceeds
+    // maxSeconds. Untimestamped panoramas use distance only.
+    var segments = [];
+    var current = [];
+    var prev = null;
+    panoramas.forEach(function (p) {
+      if (prev) {
+        var distance = haversineMeters(prev, p);
+        var breakHere = distance > maxMeters;
+        if (!breakHere && prev.captured_at && p.captured_at) {
+          var dt = (Date.parse(p.captured_at) - Date.parse(prev.captured_at)) / 1000;
+          if (isFinite(dt) && Math.abs(dt) > maxSeconds) breakHere = true;
+        }
+        if (breakHere) {
+          if (current.length) segments.push(current);
+          current = [];
+        }
+      }
+      current.push([p.lat, p.lon]);
+      prev = p;
+    });
+    if (current.length) segments.push(current);
+    return segments;
+  }
+
   function buildMap(metadata) {
     var defaultZoom = metadata.default_zoom || 13;
     var layers = metadata.map_layers && metadata.map_layers.length
@@ -183,12 +222,16 @@
 
     orderedPanoramas = sortByCaptureOrder(withCoords);
 
-    var pathPoints = orderedPanoramas
-      .filter(function (p) { return !!p.captured_at; })
-      .map(function (p) { return [p.lat, p.lon]; });
-    if (pathPoints.length >= 2) {
-      L.polyline(pathPoints, { color: PATH_COLOR, weight: 2, opacity: 0.7 }).addTo(map);
-    }
+    var pathCfg = metadata.path || {};
+    var maxGapMeters = typeof pathCfg.max_gap_meters === "number" ? pathCfg.max_gap_meters : 50;
+    var maxGapSeconds = typeof pathCfg.max_gap_seconds === "number" ? pathCfg.max_gap_seconds : 10;
+
+    var segments = buildPathSegments(orderedPanoramas, maxGapMeters, maxGapSeconds);
+    segments.forEach(function (seg) {
+      if (seg.length >= 2) {
+        L.polyline(seg, { color: PATH_COLOR, weight: 2, opacity: 0.7 }).addTo(map);
+      }
+    });
 
     var markerGroup = L.featureGroup();
     orderedPanoramas.forEach(function (p) {
