@@ -402,17 +402,29 @@ def build_anonymizer(config: AnonymizationConfig, device: ResolvedDevice) -> Ano
     if not config.enabled:
         return Anonymizer(detectors, config)
 
+    face_threshold = (
+        config.face_confidence_threshold
+        if config.face_confidence_threshold is not None
+        else config.confidence_threshold
+    )
+    plate_threshold = (
+        config.plate_confidence_threshold
+        if config.plate_confidence_threshold is not None
+        else config.confidence_threshold
+    )
+
     if config.face_model_path is not None:
         try:
             detectors.append(
                 YOLOv8Detector(
                     config.face_model_path,
                     label="face",
-                    confidence_threshold=config.confidence_threshold,
+                    confidence_threshold=face_threshold,
                     device=device,
                     imgsz=config.inference_imgsz,
                 )
             )
+            logger.info("Face detector loaded with confidence_threshold=%.2f", face_threshold)
         except (ImportError, FileNotFoundError) as exc:
             logger.warning("Failed to load face model: %s", exc)
     else:
@@ -424,11 +436,12 @@ def build_anonymizer(config: AnonymizationConfig, device: ResolvedDevice) -> Ano
                 YOLOv8Detector(
                     config.plate_model_path,
                     label="license_plate",
-                    confidence_threshold=config.confidence_threshold,
+                    confidence_threshold=plate_threshold,
                     device=device,
                     imgsz=config.inference_imgsz,
                 )
             )
+            logger.info("License plate detector loaded with confidence_threshold=%.2f", plate_threshold)
         except (ImportError, FileNotFoundError) as exc:
             logger.warning("Failed to load plate model: %s", exc)
     else:

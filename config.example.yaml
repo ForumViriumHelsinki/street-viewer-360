@@ -26,10 +26,18 @@ anonymization:
   #     raise toward 0.40-0.55.
   #   - Missing real faces/plates (e.g. small, partially occluded, or
   #     off-angle): lower toward 0.15-0.20.
-  # Tune face and plate separately by running two passes if their error
-  # profiles differ -- typically plates tolerate a higher threshold than
-  # faces because plate text is a strong, distinctive feature.
+  # Used as the default for both detectors. To tune face and plate
+  # independently (typical when one model is noisier than the other), set
+  # one or both of the per-detector overrides below. When unset (null),
+  # the detector falls back to this default.
   confidence_threshold: 0.35
+
+  # Per-detector overrides. Common pattern: a higher threshold for plates
+  # (their text gives strong, distinctive signals -- few false positives at
+  # 0.45+) and a lower threshold for faces (more recall needed at distance,
+  # tolerable false-positive cost on building textures).
+  # face_confidence_threshold: 0.30
+  # plate_confidence_threshold: 0.45
 
   # Gaussian blur strength applied inside each detection box. Higher = more
   # privacy at the cost of obvious smudges.
@@ -85,6 +93,15 @@ metadata:
 path:
   max_gap_meters: 50.0
   max_gap_seconds: 10.0
+
+# Panorama viewer zoom limits, in degrees of horizontal field of view.
+# Smaller min_hfov = tighter zoom-in. Pannellum's own default is 50; we use
+# 30 so users can read distant signage. Going below ~10 starts to look
+# perspective-distorted on equirectangular sources. max_hfov caps the
+# zoom-out (above ~120 the fisheye distortion gets uncomfortable).
+viewer:
+  min_hfov: 30.0
+  max_hfov: 120.0
 
 map_layers:
   - name: "OpenStreetMap"
