@@ -24,6 +24,7 @@
   var markersById = {};
   var currentIndex = -1;
   var suppressHashRead = false;
+  var viewerLimits = { minHfov: 30, maxHfov: 120 };
 
   function parseHash() {
     var h = (location.hash || "").replace(/^#/, "");
@@ -114,7 +115,9 @@
       autoLoad: true,
       showZoomCtrl: true,
       showFullscreenCtrl: true,
-      hfov: 100
+      hfov: 100,
+      minHfov: viewerLimits.minHfov,
+      maxHfov: viewerLimits.maxHfov
     };
     if (typeof panorama.heading === "number") {
       config.yaw = panorama.heading;
@@ -158,7 +161,15 @@
     if (!orderedPanoramas.length || currentIndex < 0) return;
     var n = orderedPanoramas.length;
     var next = (currentIndex + delta + n) % n;
-    openViewer(orderedPanoramas[next]);
+    var overrides = null;
+    if (currentPannellum) {
+      overrides = {
+        yaw: currentPannellum.getYaw(),
+        pitch: currentPannellum.getPitch(),
+        hfov: currentPannellum.getHfov()
+      };
+    }
+    openViewer(orderedPanoramas[next], overrides);
   }
 
   closeBtn.addEventListener("click", closeViewer);
@@ -238,6 +249,10 @@
   }
 
   function buildMap(metadata) {
+    var viewerCfg = metadata.viewer || {};
+    if (typeof viewerCfg.min_hfov === "number") viewerLimits.minHfov = viewerCfg.min_hfov;
+    if (typeof viewerCfg.max_hfov === "number") viewerLimits.maxHfov = viewerCfg.max_hfov;
+
     var defaultZoom = metadata.default_zoom || 13;
     var layers = metadata.map_layers && metadata.map_layers.length
       ? metadata.map_layers

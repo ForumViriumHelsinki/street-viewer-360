@@ -231,6 +231,10 @@ def refresh_frontend(
         "max_gap_meters": cfg.path.max_gap_meters,
         "max_gap_seconds": cfg.path.max_gap_seconds,
     }
+    metadata_doc["viewer"] = {
+        "min_hfov": cfg.viewer.min_hfov,
+        "max_hfov": cfg.viewer.max_hfov,
+    }
     metadata_path.write_text(json.dumps(metadata_doc, indent=2, ensure_ascii=False), encoding="utf-8")
 
     write_frontend(output_dir, cfg, title=title)

@@ -266,6 +266,10 @@ def generate(
             "max_gap_meters": config.path.max_gap_meters,
             "max_gap_seconds": config.path.max_gap_seconds,
         },
+        "viewer": {
+            "min_hfov": config.viewer.min_hfov,
+            "max_hfov": config.viewer.max_hfov,
+        },
         "panoramas": panoramas,
     }
 

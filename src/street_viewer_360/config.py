@@ -31,6 +31,8 @@ class AnonymizationConfig(BaseModel):
     blur_sigma: float = 15.0
     detector: str = "yolov8"
     confidence_threshold: float = 0.25
+    face_confidence_threshold: float | None = None
+    plate_confidence_threshold: float | None = None
     face_model_path: Path | None = None
     plate_model_path: Path | None = None
     expand_box_ratio: float = 0.1
@@ -56,6 +58,15 @@ class MetadataConfig(BaseModel):
 
     include_without_gps: bool = False
     timezone: str = "local"
+
+
+class ViewerConfig(BaseModel):
+    """Panorama viewer (Pannellum) view-limit settings."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    min_hfov: float = 30.0
+    max_hfov: float = 120.0
 
 
 class MapLayer(BaseModel):
@@ -98,6 +109,7 @@ class AppConfig(BaseModel):
     anonymization: AnonymizationConfig = Field(default_factory=AnonymizationConfig)
     metadata: MetadataConfig = Field(default_factory=MetadataConfig)
     path: PathConfig = Field(default_factory=PathConfig)
+    viewer: ViewerConfig = Field(default_factory=ViewerConfig)
     map_layers: list[MapLayer] = Field(default_factory=_default_map_layers)
 
 
