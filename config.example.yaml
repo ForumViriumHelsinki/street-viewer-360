@@ -8,15 +8,73 @@ overwrite: false
 device: "auto"  # auto | cpu | cuda | mps
 
 anonymization:
+  # Master switch. Set to false to skip detection and blurring entirely.
   enabled: true
-  blur_sigma: 15
+
+  # Detector backend. Only "yolov8" is supported at the moment.
   detector: "yolov8"
-  confidence_threshold: 0.35
+
   # Run `street-viewer-360 download-models --target ./models` first,
-  # then point these to the downloaded .pt files:
+  # then point these to the downloaded .pt files. If either is omitted,
+  # that category is skipped (e.g. drop plate_model_path on indoor sets).
   # face_model_path: ./models/yolov8n-face.pt
   # plate_model_path: ./models/yolov11n-license-plate.pt
+
+  # Minimum detector confidence to keep a box. Most important knob for the
+  # false-positive / false-negative tradeoff.
+  #   - Too many false positives (random textures, foliage, signs blurred):
+  #     raise toward 0.40-0.55.
+  #   - Missing real faces/plates (e.g. small, partially occluded, or
+  #     off-angle): lower toward 0.15-0.20.
+  # Tune face and plate separately by running two passes if their error
+  # profiles differ -- typically plates tolerate a higher threshold than
+  # faces because plate text is a strong, distinctive feature.
+  confidence_threshold: 0.35
+
+  # Gaussian blur strength applied inside each detection box. Higher = more
+  # privacy at the cost of obvious smudges.
+  #   - Faces are recognizable: raise to 20-30.
+  #   - Blur is too heavy / aesthetic complaints: lower to 8-12.
+  # Kernel size is derived automatically (~4 * sigma, rounded to odd).
+  blur_sigma: 15
+
+  # Fraction by which each detected box is expanded before blurring (0.1 =
+  # +10% on each side). Adds a safety margin so the blur covers a bit past
+  # the detector's tight box (hair, jaw, plate frame, motion blur).
+  #   - Edges of faces/plates still visible at box border: raise to 0.15-0.25.
+  #   - Too much surrounding scenery blurred: lower to 0.0-0.05.
   expand_box_ratio: 0.1
+
+  # Image size passed to the YOLO predict() call. Larger = better recall on
+  # small/distant objects, slower inference, more VRAM. Should match or
+  # exceed tile_size when tiling is active.
+  #   - Missing small/far faces or plates: try 1536 or 1920.
+  #   - Inference is slow or runs out of memory: drop to 960 or 832.
+  inference_imgsz: 1280
+
+  # Tile size in pixels for sliding-window inference on high-resolution
+  # panoramas. Set to 0 to disable tiling and run the whole image at once.
+  # Tiling massively improves recall on 360° images where faces/plates are
+  # tiny relative to the full frame.
+  #   - Panoramas are huge (e.g. 8K+) and small objects still missed: keep
+  #     this at 1280 and increase inference_imgsz to match.
+  #   - Inputs are already small (<= 2K wide): set to 0 to skip tiling.
+  tile_size: 1280
+
+  # Overlap between adjacent tiles in pixels. Prevents objects on tile
+  # boundaries from being split and missed.
+  #   - Objects near tile seams are missed or partially blurred: raise to
+  #     384-512 (always keep < tile_size / 2).
+  #   - Inference too slow due to many overlapping tiles: lower to 128.
+  tile_overlap: 256
+
+  # IoU threshold for non-maximum suppression. Detections of the same label
+  # whose overlap exceeds this against a higher-confidence box are dropped.
+  #   - Same face/plate gets blurred twice with slightly different boxes
+  #     (often a tiling artifact): lower to 0.30-0.40.
+  #   - Two genuinely adjacent objects (e.g. two faces close together) get
+  #     merged into one: raise to 0.55-0.65.
+  nms_iou_threshold: 0.45
 
 metadata:
   include_without_gps: false
