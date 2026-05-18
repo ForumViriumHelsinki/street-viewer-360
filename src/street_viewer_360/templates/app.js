@@ -23,6 +23,46 @@
   var orderedPanoramas = [];
   var markersById = {};
   var currentIndex = -1;
+  var suppressHashRead = false;
+
+  function parseHash() {
+    var h = (location.hash || "").replace(/^#/, "");
+    if (!h) return {};
+    var out = {};
+    h.split("&").forEach(function (kv) {
+      if (!kv) return;
+      var i = kv.indexOf("=");
+      if (i < 0) return;
+      out[decodeURIComponent(kv.slice(0, i))] = decodeURIComponent(kv.slice(i + 1));
+    });
+    return out;
+  }
+
+  function writeHash(params) {
+    var parts = [];
+    Object.keys(params).forEach(function (k) {
+      if (params[k] === null || params[k] === undefined || params[k] === "") return;
+      parts.push(encodeURIComponent(k) + "=" + encodeURIComponent(params[k]));
+    });
+    var newHash = parts.length ? "#" + parts.join("&") : "";
+    var url = location.pathname + location.search + newHash;
+    suppressHashRead = true;
+    history.replaceState(null, "", url);
+    // Reset on next tick so genuine hashchange events still work.
+    setTimeout(function () { suppressHashRead = false; }, 0);
+  }
+
+  function updateHashFromViewer() {
+    if (!currentPannellum || currentIndex < 0) return;
+    var pano = orderedPanoramas[currentIndex];
+    var fmt = function (v) { return (Math.round(v * 10) / 10).toString(); };
+    writeHash({
+      pano: pano.id,
+      yaw: fmt(currentPannellum.getYaw()),
+      pitch: fmt(currentPannellum.getPitch()),
+      hfov: fmt(currentPannellum.getHfov())
+    });
+  }
 
   function setStatus(text) {
     statusEl.textContent = text || "";
@@ -41,7 +81,7 @@
     });
   }
 
-  function openViewer(panorama) {
+  function openViewer(panorama, viewOverrides) {
     var idx = orderedPanoramas.findIndex(function (p) {
       return p.id === panorama.id;
     });
@@ -79,7 +119,18 @@
     if (typeof panorama.heading === "number") {
       config.yaw = panorama.heading;
     }
+    if (viewOverrides) {
+      if (typeof viewOverrides.yaw === "number") config.yaw = viewOverrides.yaw;
+      if (typeof viewOverrides.pitch === "number") config.pitch = viewOverrides.pitch;
+      if (typeof viewOverrides.hfov === "number") config.hfov = viewOverrides.hfov;
+    }
     currentPannellum = window.pannellum.viewer(panoramaEl, config);
+
+    currentPannellum.on("mouseup", updateHashFromViewer);
+    currentPannellum.on("touchend", updateHashFromViewer);
+    currentPannellum.on("zoomchange", updateHashFromViewer);
+    currentPannellum.on("animatefinished", updateHashFromViewer);
+    currentPannellum.on("load", updateHashFromViewer);
 
     setActiveMarker(panorama.id);
     if (leafletMap && typeof panorama.lat === "number" && typeof panorama.lon === "number") {
@@ -97,6 +148,7 @@
     panoramaEl.innerHTML = "";
     currentIndex = -1;
     setActiveMarker(null);
+    writeHash({});
     if (leafletMap) {
       setTimeout(function () { leafletMap.invalidateSize(); }, 0);
     }
@@ -252,7 +304,29 @@
     map.fitBounds(markerGroup.getBounds().pad(0.2), { maxZoom: FIT_MAX_ZOOM });
 
     setStatus(orderedPanoramas.length + " panorama(s) on map");
+
+    openFromHash();
   }
+
+  function openFromHash() {
+    var params = parseHash();
+    if (!params.pano) return;
+    var pano = orderedPanoramas.find(function (p) { return p.id === params.pano; });
+    if (!pano) return;
+    var overrides = {};
+    var y = parseFloat(params.yaw);
+    var pi = parseFloat(params.pitch);
+    var hf = parseFloat(params.hfov);
+    if (isFinite(y)) overrides.yaw = y;
+    if (isFinite(pi)) overrides.pitch = pi;
+    if (isFinite(hf)) overrides.hfov = hf;
+    openViewer(pano, overrides);
+  }
+
+  window.addEventListener("hashchange", function () {
+    if (suppressHashRead) return;
+    openFromHash();
+  });
 
   fetch("metadata.json", { cache: "no-cache" })
     .then(function (r) {
