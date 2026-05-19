@@ -1,95 +1,88 @@
-# Street Viewer 360 - Project Development Plan
+# Street Viewer 360 - Architecture & Design
 
-## 1. Project Overview
+This document describes the current architecture of street-viewer-360. For
+open tasks and future work see [TODO.md](TODO.md).
 
-Street Viewer 360 is a local command-line tool that processes 360-degree panorama images, anonymizes privacy-sensitive content, extracts geospatial metadata, and generates a static web package for browsing the images on an interactive map.
+## 1. Overview
 
-The first version is intentionally scoped as a local static generator. It should run on macOS and Linux, read images from a local source directory, and produce a self-contained output directory that can be opened in a browser or served as static files.
+Street Viewer 360 is a local command-line tool that turns a folder of
+360-degree panorama photos into a static, browsable web package: a Leaflet
+map with markers and a Pannellum panorama viewer, optionally with faces and
+license plates blurred. The generator runs on macOS and Linux, reads images
+from a local directory, and writes a self-contained output directory that
+can be opened in a browser or served as static files.
 
-## 2. MVP Scope
+The tool is intentionally scoped as a local static generator. It does not
+provide a multi-user web app, server-side project management, authentication,
+cloud storage, manual anonymization review UI, or frontend-side metadata
+editing.
 
-The MVP should support one local image collection at a time.
+## 2. Capabilities
 
-### In Scope
+- Reads `.jpg`, `.jpeg`, `.png`, and `.36P` (GoPro MAX 2 panorama) files.
+- Extracts EXIF metadata: GPS lat/lon, heading, timestamp, camera info.
+- Extracts XMP GPano metadata: projection type and pose angles.
+- Auto-levels equirectangular panoramas when the camera was tilted at
+  capture time (XMP `GPano:Pose{Heading,Pitch,Roll}Degrees`).
+- Best-effort face and license-plate detection via YOLOv8 with Gaussian
+  blur over each detection box.
+- Tiled inference for high-resolution panoramas to improve recall on small
+  objects.
+- CPU, CUDA, or MPS device selection.
+- Output as WebP (default) or JPEG, preserving EXIF and XMP.
+- Generates `index.html`, `metadata.json`, `generation_report.json`, an
+  `images/` directory, and local Leaflet + Pannellum assets.
+- Frontend opens panoramas via marker clicks, supports keyboard navigation,
+  shareable URL bookmarks, and a map+viewer split view.
 
-- A Python-based CLI for macOS and Linux.
-- Reading panorama images from a local source directory.
-- Extracting EXIF metadata, including GPS latitude, GPS longitude, heading when available, and timestamp when available.
-- Automatic best-effort anonymization of faces and license plates.
-- CPU execution by default, with optional CUDA acceleration when available.
-- Generation of a static web package containing:
-  - `index.html`
-  - anonymized panorama images
-  - `metadata.json`
-  - local JavaScript and CSS assets
-- Leaflet-based map view with image markers.
-- Pannellum-based 360 panorama viewer.
-- Configuration through `config.yaml`, with CLI arguments overriding config values.
-- Offline-ready frontend assets, meaning no runtime CDN dependencies.
-
-### Out of Scope for MVP
-
-- Multi-user web application.
-- Server-side project management.
-- Authentication or user management.
-- Cloud storage or cloud processing.
-- Manual anonymization review UI.
-- Strict audit trail for anonymization decisions.
-- Editing panorama metadata from the frontend.
-
-## 3. Key Requirements
-
-### Functional Requirements
-
-- The CLI must accept an input directory and output directory.
-- The pipeline must skip unsupported files and report them clearly.
-- The pipeline must preserve a traceable relationship between source images and generated images.
-- Images without usable GPS coordinates must be reported and excluded from the map by default.
-- The frontend must show each geotagged panorama as a marker on the map.
-- Clicking a marker must open the corresponding panorama in the viewer.
-- The generated package must be usable without a build step after generation.
-
-### Non-Functional Requirements
-
-- The MVP should favor predictable local execution over architectural complexity.
-- The generated frontend should not depend on external runtime services, except optional configured map tile URLs.
-- The CLI should provide readable progress and error messages.
-- The anonymization process should avoid modifying source images.
-- The metadata format should be stable enough for future migration into a richer project format.
-
-## 4. Proposed Architecture
+## 3. Architecture
 
 ```mermaid
 flowchart LR
     InputImages["Source image directory"] --> ImageDiscovery["Image discovery"]
-    ImageDiscovery --> MetadataExtraction["EXIF metadata extraction"]
-    MetadataExtraction --> Anonymization["Face and license plate anonymization"]
-    Anonymization --> OutputImages["Anonymized output images"]
+    ImageDiscovery --> MetadataExtraction["EXIF + XMP GPano extraction"]
+    MetadataExtraction --> Decode["Load image via cv2"]
+    Decode --> Horizon["Horizon correction (optional)"]
+    Horizon --> Anonymization["Face & plate anonymization (optional)"]
+    Anonymization --> Encode["Encode WebP / JPEG with EXIF + XMP"]
+    Encode --> OutputImages["Output images"]
     MetadataExtraction --> MetadataJson["metadata.json"]
     OutputImages --> StaticPackage["Static web package"]
     MetadataJson --> StaticPackage
-    LocalAssets["Local Leaflet and Pannellum assets"] --> StaticPackage
+    LocalAssets["Local Leaflet + Pannellum assets"] --> StaticPackage
 ```
 
-The system should be organized as a small Python package with a thin CLI layer and separate modules for discovery, metadata extraction, anonymization, output generation, and frontend templates.
+The pipeline decodes each source image once and threads a single in-memory
+numpy array through the optional horizon correction and anonymization
+stages before encoding it in the chosen output format. EXIF and XMP from
+the source are embedded in the output, with the GPano pose angles reset to
+zero whenever horizon correction was applied so downstream 360 viewers do
+not re-rotate.
 
-## 5. Suggested Repository Structure
+## 4. Repository Structure
 
 ```text
 street-viewer-360/
-  PROJECT_DEVELOPMENT_PLAN.md
+  PROJECT_DEVELOPMENT_PLAN.md   # this document
+  TODO.md
   README.md
   pyproject.toml
+  Justfile
   config.example.yaml
   src/
     street_viewer_360/
       __init__.py
-      cli.py
-      config.py
+      cli.py              # typer entry point
+      config.py           # pydantic AppConfig + YAML loader
       discovery.py
-      metadata.py
-      anonymization.py
-      generator.py
+      device.py           # auto / cpu / cuda / mps resolution
+      metadata.py         # EXIF + XMP GPano extraction
+      horizon.py          # equirectangular ERP rotation
+      image_io.py         # unified load + save (jpeg, webp, metadata)
+      anonymization.py    # YOLOv8 detectors + blur
+      generator.py        # pipeline orchestration
+      frontend.py         # Jinja2 rendering + asset copy
+      models.py           # optional .pt download helper
       templates/
         index.html.j2
         app.js.j2
@@ -98,295 +91,218 @@ street-viewer-360/
         leaflet/
         pannellum/
   tests/
-    test_config.py
-    test_metadata.py
-    test_generator.py
-  examples/
-    config.yaml
 ```
 
-This structure keeps the CLI and processing pipeline testable while allowing the generated web package to remain simple static output.
+## 5. CLI
 
-## 6. CLI Proposal
+The main command is `street-viewer-360` with three subcommands:
 
-The main command can be named `street-viewer-360`.
+- `generate` - run the full pipeline.
+- `refresh-frontend` - re-render frontend assets without re-processing images.
+- `download-models` - fetch default YOLOv8 face and plate weights.
 
-```bash
-street-viewer-360 generate \
-  --input ./source-images \
-  --output ./dist \
-  --config ./config.yaml
-```
+CLI flags override config-file values, which override built-in defaults.
+The full flag list lives in [README.md](README.md); the most consequential
+flags are `--input`, `--output`, `--config`, `--overwrite`,
+`--no-anonymization`, `--horizon`, `--output-format`, and `--webp-method`.
 
-Recommended options:
+Default behavior is conservative:
 
-```text
-generate
-  --input PATH              Source directory containing panorama images.
-  --output PATH             Output directory for the generated static package.
-  --config PATH             Optional YAML configuration file.
-  --recursive / --no-recursive
-  --overwrite               Allow replacing an existing output directory.
-  --device auto|cpu|cuda|mps
-  --blur-sigma NUMBER
-  --default-zoom NUMBER
-  --include-without-gps     Include non-geotagged images in metadata but not map markers.
-  --dry-run                 Inspect inputs and metadata without writing output.
-```
-
-The default behavior should be conservative:
-
-- Do not overwrite an existing output directory unless `--overwrite` is provided.
+- Do not overwrite an existing output directory without `--overwrite`.
 - Do not modify source files.
-- Exclude images without GPS coordinates from map markers.
-- Use `device: auto` unless explicitly configured.
+- Exclude images without GPS from map markers.
+- Auto-detect device (`device: auto`).
+- Auto-correct horizon when GPano pose angles exceed 0.2 degrees.
 
-## 7. Configuration Proposal
+## 6. Configuration
 
-`config.yaml` should provide defaults that can be overridden by CLI arguments.
+`config.example.yaml` documents every option. The top-level shape is:
 
 ```yaml
 default_zoom: 13
-output_dir: "./dist"
+output_dir: ./dist
 recursive: true
 overwrite: false
-device: "auto"
+device: auto
 
-anonymization:
-  enabled: true
-  blur_sigma: 15
-  detector: "yolov8"
-  confidence_threshold: 0.35
-
-metadata:
-  include_without_gps: false
-  timezone: "local"
-
-map_layers:
-  - name: "OpenStreetMap"
-    url: "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-    attribution: "(c) OpenStreetMap contributors"
-    default: true
-  - name: "Satellite"
-    url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
-    attribution: "Tiles (c) Esri"
-    default: false
+anonymization: { ... }   # enable, model paths, thresholds, tiling
+horizon: { ... }         # mode, threshold, offsets
+output: { ... }          # format, quality, webp_method
+metadata: { ... }        # include_without_gps, timezone
+path: { ... }            # max gaps that break the map polyline
+viewer: { ... }          # min/max field of view
+map_layers: [ ... ]
 ```
 
-Runtime frontend dependencies should be copied into the generated package from local project assets instead of loaded from CDNs.
+CLI arguments override config values, which override defaults.
 
-## 8. Processing Pipeline
+## 7. Pipeline Stages
 
-### 8.1 Image Discovery
+### 7.1 Image discovery
 
-- Find supported image files from the input directory.
-- Supported extensions for MVP: `.jpg`, `.jpeg`, `.png`.
-- Keep deterministic ordering for stable output.
-- Record skipped files and unsupported extensions in the generation summary.
+Finds supported image files in deterministic order (`sorted`). Records
+skipped and unsupported files in the generation summary.
 
-### 8.2 Metadata Extraction
+### 7.2 Metadata extraction
 
-- Extract GPS latitude and longitude.
-- Extract heading when available from EXIF or camera-specific tags.
-- Extract capture timestamp when available.
-- Normalize coordinates into decimal degrees.
-- Store source filename and generated output path.
+- EXIF via `exifread`: GPS lat/lon (normalized to decimal degrees), GPS
+  heading, capture timestamp, image dimensions, camera make and model.
+- XMP via Pillow's `Image.getxmp()` (defusedxml-backed): projection type
+  and GPano pose angles (heading, pitch, roll in degrees).
+- Defensive against missing or malformed tags; missing values become None
+  rather than raising.
 
-Potential libraries:
+### 7.3 Horizon correction
 
-- `Pillow` for image handling and basic EXIF access.
-- `ExifRead` for broader EXIF tag coverage if Pillow is insufficient.
+Equirectangular-only. Decides per-image whether to rotate based on
+`config.horizon.mode`:
 
-### 8.3 Anonymization
+- `auto` (default) - rotate when `max(|pitch|, |roll|, |heading|)` exceeds
+  `min_angle_degrees` (default 0.2).
+- `always` - rotate whenever pose data or manual offsets are present.
+- `never` - skip entirely.
 
-- Detect privacy-sensitive regions, initially faces and license plates.
-- Apply Gaussian blur or equivalent OpenCV blur to detected regions.
-- Save anonymized images into the output image directory.
-- Keep source images unchanged.
+Manual offsets in degrees can be added (or override XMP entirely via
+`override_metadata: true`). Rotation uses `cv2.remap` with bilinear
+interpolation by default; nearest and bicubic are also available. The frame
+convention is x=forward, y=left, z=up, with GPano sign conventions
+(positive pitch = nose up, positive roll = right wing down, positive
+heading = clockwise from above).
 
-Potential libraries:
+After rotation the GPano pose angles in the embedded XMP are reset to 0.0
+so other 360 viewers do not re-apply the correction.
 
-- YOLOv8 or a compatible object detection model for detection.
-- OpenCV for blur operations.
-- PyTorch device detection for `cuda`, `mps`, or `cpu`.
+### 7.4 Anonymization
 
-For MVP, anonymization is automatic best-effort. The generated documentation and CLI output should clearly state that users are responsible for reviewing output before publication.
+Best-effort face and license-plate detection with YOLOv8 (ultralytics).
+Each detection is dilated by `expand_box_ratio` and Gaussian-blurred in
+place. For high-resolution panoramas the image is tiled with overlap to
+preserve recall on small objects; tile detections are merged and pruned
+with non-maximum suppression. Per-detector confidence thresholds let face
+and plate models be tuned independently.
 
-### 8.4 Static Package Generation
+Anonymization is opt-in via model paths. Without model files the stage is
+skipped with a warning and the image is passed through untouched (status
+`no_models` in `generation_report.json`).
 
-The output directory should be structured like this:
+### 7.5 Encoding
+
+A single `image_io.save` writes the in-memory array in WebP or JPEG using
+Pillow. EXIF and XMP segments are extracted from the source (also via
+Pillow's `info` dict) and embedded in the output. WebP method (encoder
+effort, 0..6) is configurable; default is 4. JPEG quality and WebP quality
+share the same `output.quality` knob (1..100, default 90).
+
+When neither horizon correction nor anonymization runs, the source is
+re-encoded in the chosen format via `image_io.copy_with_format` rather
+than copied verbatim, so users still get a consistent output format.
+
+### 7.6 Static package generation
 
 ```text
 dist/
   index.html
   metadata.json
+  generation_report.json
   images/
-    pano_000001.jpg
-    pano_000002.jpg
+    pano_000001.webp
+    pano_000002.webp
+    ...
   assets/
     leaflet/
     pannellum/
     app.js
     styles.css
-  generation_report.json
 ```
 
-`generation_report.json` should summarize processing results, warnings, skipped files, images without GPS, and anonymization counts when available.
+`generation_report.json` summarizes inputs, outputs, anonymization counts,
+horizon-correction counts, and per-image failures.
 
-## 9. Metadata Schema Proposal
+## 8. Metadata Schema
 
-`metadata.json` should be a stable frontend-facing file.
+`metadata.json` is the frontend-facing contract. Version 1:
 
 ```json
 {
   "version": 1,
-  "generated_at": "2026-05-12T10:00:00Z",
+  "generated_at": "2026-05-19T08:00:00Z",
   "default_zoom": 13,
-  "map_layers": [
-    {
-      "name": "OpenStreetMap",
-      "url": "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
-      "attribution": "(c) OpenStreetMap contributors",
-      "default": true
-    }
-  ],
+  "map_layers": [ ... ],
+  "path": { "max_gap_meters": 50.0, "max_gap_seconds": 10.0 },
+  "viewer": { "min_hfov": 30.0, "max_hfov": 120.0 },
   "panoramas": [
     {
       "id": "pano_000001",
-      "source_filename": "IMG_0001.jpg",
-      "image_path": "images/pano_000001.jpg",
-      "lat": 60.1699,
-      "lon": 24.9384,
+      "source_filename": "GSAA0060.36P",
+      "image_path": "images/pano_000001.webp",
+      "lat": 60.1902,
+      "lon": 24.9610,
       "heading": 90.0,
-      "captured_at": "2026-05-12T09:30:00Z",
+      "captured_at": "2026-05-12T08:27:04",
+      "camera": { "make": "GoPro", "model": "MAX2" },
+      "dimensions": { "width": 7680, "height": 3840 },
       "anonymization": {
         "status": "processed",
-        "detections": {
-          "faces": 2,
-          "license_plates": 1
-        }
+        "detections": { "faces": 2, "license_plates": 1 }
+      },
+      "horizon_correction": {
+        "applied": true,
+        "pitch": -13.4,
+        "roll": 0.0,
+        "heading": 0.0,
+        "reason": "mode=auto"
       }
     }
   ]
 }
 ```
 
-The frontend should treat optional fields such as `heading`, `captured_at`, and detection counts defensively.
+Optional fields (`heading`, `captured_at`, `camera`, `dimensions`,
+detection counts) are treated defensively by the frontend.
 
-## 10. Frontend Behavior
+## 9. Error Handling
 
-The generated `index.html` should load local assets and `metadata.json`.
+Fatal errors (CLI exits with non-zero status):
 
-Expected MVP behavior:
-
-- Initialize a Leaflet map.
-- Load configured map layers.
-- Add markers for panoramas with valid coordinates.
-- Fit the map bounds to available markers.
-- Open the selected panorama in a Pannellum viewer when a marker is clicked.
-- Show basic image details such as filename and timestamp when available.
-- Display a clear message if no geotagged panoramas are available.
-
-The frontend should be generated as static files and should not require a framework for the MVP.
-
-## 11. Error Handling and Reporting
-
-The CLI should distinguish between fatal errors and warnings.
-
-Fatal errors:
-
-- Input directory does not exist.
+- Input directory missing.
 - Output directory exists without `--overwrite`.
-- Configuration file cannot be parsed.
-- No supported images are found.
+- Config file cannot be parsed or fails pydantic validation.
+- No supported images found.
 
-Warnings:
+Warnings (per-image, processing continues):
 
-- Image has no GPS coordinates.
-- Image metadata is partially missing.
-- Anonymization detector is unavailable and anonymization is disabled only if explicitly allowed.
-- Individual image fails processing while others can continue.
+- Image lacks GPS coordinates.
+- Anonymization detectors unavailable.
+- Individual image fails to decode or process.
 
-The generation report should make it easy to review what happened after a run.
+`generation_report.json` makes it easy to review what happened after a run.
 
-## 12. Testing Strategy
+## 10. Testing
 
-Recommended tests for MVP:
+`pytest` covers:
 
-- Config loading and CLI override behavior.
-- Image discovery with supported and unsupported files.
-- EXIF GPS parsing using fixture images.
-- Metadata JSON generation.
-- Output directory generation.
-- Handling of missing GPS coordinates.
-- Frontend template rendering with representative metadata.
+- Config loading and CLI-override behavior (`test_config.py`).
+- Image discovery with supported and unsupported files (`test_discovery.py`).
+- EXIF GPS parsing on synthetic fixtures (`test_metadata.py`).
+- Anonymizer blur logic and NMS (`test_anonymization.py`).
+- Generator end-to-end including format selection (`test_generator.py`).
+- Horizon decision logic and ERP rotation math (`test_horizon.py`).
+- Frontend template rendering (`test_frontend.py`).
 
-Anonymization tests should start with unit-level validation of blur application on known regions. Model accuracy testing can be added later with curated fixtures.
+42 tests at the time of writing.
 
-## 13. Implementation Milestones
+## 11. Risks and Open Decisions
 
-### Milestone 1: Project Skeleton
-
-- Add Python packaging with `pyproject.toml`.
-- Add CLI entry point.
-- Add configuration loading.
-- Add basic tests and linting setup.
-
-### Milestone 2: Metadata Pipeline
-
-- Implement image discovery.
-- Extract EXIF metadata.
-- Generate `metadata.json`.
-- Generate a basic processing report.
-
-### Milestone 3: Static Frontend Generator
-
-- Add Jinja2 templates for `index.html`, `app.js`, and `styles.css`.
-- Copy local Leaflet and Pannellum assets.
-- Render markers and panorama viewer from metadata.
-
-### Milestone 4: Anonymization
-
-- Add detector integration.
-- Add blur processing.
-- Add device selection for `auto`, `cpu`, `cuda`, and `mps`.
-- Add detection counts to `metadata.json` and `generation_report.json`.
-
-### Milestone 5: Validation and Polish
-
-- Improve error messages.
-- Add sample configuration.
-- Add README usage instructions.
-- Test the generated package locally with representative sample images.
-
-## 14. Risks and Open Decisions
-
-- EXIF heading tags may vary between camera vendors and may require camera-specific handling.
-- License plate detection quality depends heavily on the selected model and training data.
-- macOS MPS support may not work consistently for all detection models.
-- Offline-ready JavaScript assets must be vendored or copied during setup in a controlled way.
-- Map tile URLs may still require network access unless a local tile source is configured.
-- Large panorama images may require memory-conscious processing.
-
-## 15. Future TODOs
-
-- Add a manual anonymization review workflow where users can inspect, approve, and correct blur regions before final package generation.
-- Add a stricter audit trail for anonymization decisions, including detected regions, confidence scores, model version, and processing timestamps.
-- Add support for non-GPS panoramas through manual placement or imported coordinate files.
-- Add support for GPX track matching when image GPS metadata is missing.
-- Add project manifests for regenerating or updating an existing package.
-- Add optional local tile packages for fully offline map usage.
-- Add Docker-based processing for reproducible Linux GPU execution.
-- Add end-to-end browser tests for generated web packages.
-
-## 16. Initial Development Recommendation
-
-Start with metadata extraction and static package generation before integrating anonymization. This creates a visible end-to-end workflow early and makes later anonymization work easier to validate against real generated output.
-
-The first useful development target should be:
-
-```bash
-street-viewer-360 generate --input ./examples/images --output ./dist --config ./examples/config.yaml
-```
-
-After this command works with fixture images and produces a browsable static package, anonymization can be integrated into the same pipeline.
+- EXIF heading tags vary between camera vendors; current code reads
+  `GPSImgDirection` then falls back to `GPSTrack`. Other vendors may need
+  custom handling.
+- License-plate detection quality depends heavily on the chosen model and
+  the geographic region the training set covers.
+- macOS MPS support is sometimes flaky for ultralytics versions; CPU
+  fallback works but is slower.
+- The current per-image pipeline runs serially. Parallelization is planned
+  - see [TODO.md](TODO.md) for the design.
+- Map tile URLs require network access unless a local tile source is
+  configured (planned future work).
+- Large panoramas: peak memory is ~3x the source resolution as float
+  intermediates during horizon correction. Single 8K image needs ~250 MB.
