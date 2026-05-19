@@ -42,3 +42,6 @@ htmlcov/
 /dist/
 /data/
 /models/
+
+.claude/
+config.yaml
