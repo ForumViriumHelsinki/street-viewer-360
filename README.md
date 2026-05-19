@@ -2,6 +2,8 @@
 
 Local command-line tool that turns a folder of 360 panorama photos into a static, browsable web package: a Leaflet map with markers and a Pannellum panorama viewer. Optionally blurs faces and license plates.
 
+![Street Viewer 360 map UI](docs/assets/street-viewer-360-ui-map.jpg)
+
 See [PROJECT_DEVELOPMENT_PLAN.md](PROJECT_DEVELOPMENT_PLAN.md) for the full plan.
 
 ## Requirements
@@ -34,6 +36,8 @@ uv run street-viewer-360 generate \
   --input ./data/test-photos \
   --output ./dist-output \
   --config ./config.example.yaml \
+  --logo ./local-assets/logos/customer-logo.png \
+  --logo ./local-assets/logos/partner-logo.png \
   --overwrite
 ```
 
@@ -104,8 +108,13 @@ If anonymization is enabled but no model paths are configured, the generator log
 --output-format FORMAT    jpeg | webp (default webp)
 --output-quality INT      Encoder quality 1-100 (default 90)
 --webp-method INT         WebP encoder effort 0-6 (default 4)
+--logo PATH               Header logo image; repeat to show multiple logos
 --dry-run                 Inspect without writing output
 ```
+
+Header logos are copied into the generated package in the order they are passed. They are shown in the desktop/tablet header and hidden on narrow mobile screens so the title and panorama count remain readable.
+
+Project-specific files that should stay out of git, such as customer logos or local sample inputs, can be stored under `local-assets/`. Documentation assets that should be committed live under `docs/assets/`.
 
 ### Horizon correction
 

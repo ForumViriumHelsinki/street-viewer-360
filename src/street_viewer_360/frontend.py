@@ -14,6 +14,7 @@ from street_viewer_360.config import AppConfig
 logger = logging.getLogger(__name__)
 
 _DEFAULT_TITLE = "Street Viewer 360"
+_LOGO_EXTENSIONS = {".gif", ".jpeg", ".jpg", ".png", ".svg", ".webp"}
 
 
 def _jinja_env() -> Environment:
@@ -59,7 +60,54 @@ def _copy_template_file(template_name: str, destination: Path) -> None:
         shutil.copyfile(src, destination)
 
 
-def write_frontend(output_dir: Path, config: AppConfig, *, title: str = _DEFAULT_TITLE) -> None:
+def _copy_logos(logo_paths: list[Path] | None, assets_dir: Path) -> list[dict[str, str]]:
+    """Copy user-provided logo images into the generated frontend assets.
+
+    Args:
+        logo_paths: Logo image paths in display order.
+        assets_dir: Generated package asset directory.
+
+    Returns:
+        Template-ready logo metadata with relative asset paths.
+
+    Raises:
+        FileNotFoundError: A logo path does not point to a file.
+        ValueError: A logo has an unsupported web image extension.
+    """
+    logos_dir = assets_dir / "logos"
+    if logos_dir.exists():
+        shutil.rmtree(logos_dir)
+    if not logo_paths:
+        return []
+
+    logos_dir.mkdir(parents=True, exist_ok=True)
+    logos: list[dict[str, str]] = []
+    for index, logo_path in enumerate(logo_paths, start=1):
+        src_path = logo_path.expanduser()
+        if not src_path.is_file():
+            raise FileNotFoundError(f"Logo file not found: {logo_path}")
+        suffix = src_path.suffix.lower()
+        if suffix not in _LOGO_EXTENSIONS:
+            raise ValueError(
+                f"Unsupported logo file extension for {logo_path}. Supported extensions: "
+                f"{', '.join(sorted(_LOGO_EXTENSIONS))}"
+            )
+
+        filename = f"logo_{index:03d}{suffix}"
+        shutil.copyfile(src_path, logos_dir / filename)
+        alt_text = src_path.stem.replace("-", " ").replace("_", " ").strip() or f"Logo {index}"
+        logos.append({"src": f"assets/logos/{filename}", "alt": alt_text})
+
+    return logos
+
+
+def write_frontend(
+    output_dir: Path,
+    config: AppConfig,
+    *,
+    title: str = _DEFAULT_TITLE,
+    logo_paths: list[Path] | None = None,
+) -> None:
     """Render templates and copy vendored assets into the output directory.
 
     Args:
@@ -67,6 +115,7 @@ def write_frontend(output_dir: Path, config: AppConfig, *, title: str = _DEFAULT
         config: Resolved application configuration (currently unused in templates
             beyond the title; map layers are read from metadata.json at runtime).
         title: Title shown in the HTML header and <title>.
+        logo_paths: Optional logo image paths to show in the header.
     """
     assets_dir = output_dir / "assets"
     assets_dir.mkdir(parents=True, exist_ok=True)
@@ -76,9 +125,10 @@ def write_frontend(output_dir: Path, config: AppConfig, *, title: str = _DEFAULT
 
     _copy_template_file("app.js", assets_dir / "app.js")
     _copy_template_file("styles.css", assets_dir / "styles.css")
+    logos = _copy_logos(logo_paths, assets_dir)
 
     env = _jinja_env()
-    index_html = env.get_template("index.html.j2").render(title=title)
+    index_html = env.get_template("index.html.j2").render(title=title, logos=logos)
     (output_dir / "index.html").write_text(index_html, encoding="utf-8")
 
     logger.info("Wrote frontend (index.html + assets) to %s", output_dir)

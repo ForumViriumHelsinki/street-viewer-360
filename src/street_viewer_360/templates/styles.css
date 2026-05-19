@@ -21,21 +21,59 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 16px;
   padding: 10px 16px;
   background: #1f2937;
   color: #f9fafb;
   flex: 0 0 auto;
 }
 
+.brand {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex: 0 0 auto;
+  gap: 16px;
+  margin-left: auto;
+}
+
+.brand-logos {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 8px;
+}
+
+.brand-logo {
+  display: block;
+  width: auto;
+  max-width: 120px;
+  max-height: 34px;
+  object-fit: contain;
+}
+
 .app-header h1 {
   margin: 0;
   font-size: 18px;
   font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .status {
   font-size: 13px;
   opacity: 0.85;
+  flex: 0 0 auto;
+  text-align: right;
+  white-space: nowrap;
 }
 
 .app-main {
@@ -74,6 +112,22 @@ body {
 }
 
 @media (max-width: 720px) {
+  .app-header {
+    gap: 10px;
+    padding: 8px 12px;
+  }
+  .header-right {
+    gap: 10px;
+  }
+  .brand-logos {
+    display: none;
+  }
+  .app-header h1 {
+    font-size: 16px;
+  }
+  .status {
+    font-size: 12px;
+  }
   .app-main {
     flex-direction: column;
   }

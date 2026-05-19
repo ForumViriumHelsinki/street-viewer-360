@@ -258,6 +258,7 @@ def generate(
     *,
     dry_run: bool = False,
     anonymizer: Anonymizer | None = None,
+    logo_paths: list[Path] | None = None,
 ) -> GenerationResult:
     """Run the full generate pipeline.
 
@@ -268,6 +269,7 @@ def generate(
         dry_run: If True, scan and extract metadata but do not write any files.
         anonymizer: Optional pre-built Anonymizer. When None, one is constructed
             from `config.anonymization`. Useful for tests.
+        logo_paths: Optional logo image paths to show in the generated header.
 
     Returns:
         GenerationResult summarizing the run.
@@ -422,7 +424,7 @@ def generate(
             encoding="utf-8",
         )
         logger.info("Wrote metadata.json and generation_report.json to %s", output_dir)
-        write_frontend(output_dir, config)
+        write_frontend(output_dir, config, logo_paths=logo_paths)
     else:
         logger.info("Dry run: skipped writing output files")
 

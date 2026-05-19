@@ -48,6 +48,28 @@ def _version_callback(value: bool) -> None:
         raise typer.Exit
 
 
+def _normalize_logo_paths(logo_paths: list[Path] | None) -> list[Path] | None:
+    """Validate and normalize logo paths before processing starts.
+
+    Args:
+        logo_paths: Logo image paths from the CLI.
+
+    Returns:
+        Expanded logo paths, or None when no logos were provided.
+    """
+    if not logo_paths:
+        return None
+
+    normalized: list[Path] = []
+    for logo_path in logo_paths:
+        path = logo_path.expanduser()
+        if not path.is_file():
+            logger.error("Logo file not found: %s", logo_path)
+            raise typer.Exit(code=2)
+        normalized.append(path)
+    return normalized
+
+
 @app.callback()
 def main(
     version: Annotated[
@@ -106,17 +128,26 @@ def generate(
     ] = False,
     max_gap_meters: Annotated[
         float | None,
-        typer.Option("--max-gap-meters", help="Break the map polyline between consecutive panoramas farther apart than this."),
+        typer.Option(
+            "--max-gap-meters",
+            help="Break the map polyline between consecutive panoramas farther apart than this.",
+        ),
     ] = None,
     max_gap_seconds: Annotated[
         float | None,
-        typer.Option("--max-gap-seconds", help="Break the map polyline between consecutive panoramas with a larger time gap."),
+        typer.Option(
+            "--max-gap-seconds",
+            help="Break the map polyline between consecutive panoramas with a larger time gap.",
+        ),
     ] = None,
     horizon_mode: Annotated[
         str | None,
         typer.Option(
             "--horizon",
-            help="Horizon correction: auto | always | never. Default: auto (correct when GPano pose angles exceed the threshold).",
+            help=(
+                "Horizon correction: auto | always | never. Default: auto "
+                "(correct when GPano pose angles exceed the threshold)."
+            ),
         ),
     ] = None,
     no_horizon: Annotated[
@@ -149,6 +180,10 @@ def generate(
             "--webp-method",
             help="WebP encoder effort 0..6 (higher = smaller file, slower). Default 4.",
         ),
+    ] = None,
+    logo: Annotated[
+        list[Path] | None,
+        typer.Option("--logo", help="Logo image to show in the header. Repeat to show multiple logos in order."),
     ] = None,
     dry_run: Annotated[
         bool,
@@ -212,10 +247,14 @@ def generate(
             logger.error("--webp-method must be in 0..6")
             raise typer.Exit(code=2)
         cfg.output.webp_method = webp_method
+    logo_paths = _normalize_logo_paths(logo)
 
     try:
-        result = run_generate(input_dir, cfg, dry_run=dry_run)
+        result = run_generate(input_dir, cfg, dry_run=dry_run, logo_paths=logo_paths)
     except FileNotFoundError as exc:
+        logger.error("%s", exc)
+        raise typer.Exit(code=2) from exc
+    except ValueError as exc:
         logger.error("%s", exc)
         raise typer.Exit(code=2) from exc
     except FileExistsError as exc:
@@ -262,13 +301,23 @@ def refresh_frontend(
         str,
         typer.Option("--title", help="Title shown in the HTML header."),
     ] = "Street Viewer 360",
+    logo: Annotated[
+        list[Path] | None,
+        typer.Option("--logo", help="Logo image to show in the header. Repeat to show multiple logos in order."),
+    ] = None,
     max_gap_meters: Annotated[
         float | None,
-        typer.Option("--max-gap-meters", help="Break the map polyline between consecutive panoramas farther apart than this."),
+        typer.Option(
+            "--max-gap-meters",
+            help="Break the map polyline between consecutive panoramas farther apart than this.",
+        ),
     ] = None,
     max_gap_seconds: Annotated[
         float | None,
-        typer.Option("--max-gap-seconds", help="Break the map polyline between consecutive panoramas with a larger time gap."),
+        typer.Option(
+            "--max-gap-seconds",
+            help="Break the map polyline between consecutive panoramas with a larger time gap.",
+        ),
     ] = None,
     log: Annotated[str, typer.Option("--log", help="Log level.")] = "INFO",
 ) -> None:
@@ -304,7 +353,11 @@ def refresh_frontend(
     }
     metadata_path.write_text(json.dumps(metadata_doc, indent=2, ensure_ascii=False), encoding="utf-8")
 
-    write_frontend(output_dir, cfg, title=title)
+    try:
+        write_frontend(output_dir, cfg, title=title, logo_paths=_normalize_logo_paths(logo))
+    except (FileNotFoundError, ValueError) as exc:
+        logger.error("%s", exc)
+        raise typer.Exit(code=2) from exc
     typer.echo(f"Refreshed frontend in {output_dir}")
 
 
