@@ -38,6 +38,7 @@ def test_generate_include_without_gps(tmp_path: Path) -> None:
     out = tmp_path / "out"
     cfg = AppConfig(output_dir=out)
     cfg.metadata.include_without_gps = True
+    cfg.output.format = "jpeg"
     result = generate(src, cfg)
     assert result.included == 1
     doc = json.loads((out / "metadata.json").read_text())
@@ -92,8 +93,20 @@ def test_generate_renames_36p_to_jpg(tmp_path: Path) -> None:
     out = tmp_path / "out"
     cfg = AppConfig(output_dir=out)
     cfg.metadata.include_without_gps = True
+    cfg.output.format = "jpeg"
     generate(src, cfg)
     assert (out / "images" / "pano_000001.jpg").exists()
+
+
+def test_generate_default_format_is_webp(tmp_path: Path) -> None:
+    src = tmp_path / "src"
+    src.mkdir()
+    Image.new("RGB", (16, 8)).save(src / "a.jpg", "jpeg")
+    out = tmp_path / "out"
+    cfg = AppConfig(output_dir=out)
+    cfg.metadata.include_without_gps = True
+    generate(src, cfg)
+    assert (out / "images" / "pano_000001.webp").exists()
 
 
 def test_generate_empty_input_raises(tmp_path: Path) -> None:

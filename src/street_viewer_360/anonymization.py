@@ -307,6 +307,11 @@ class Anonymizer:
         """True if at least one detector is configured."""
         return bool(self._detectors)
 
+    @property
+    def is_enabled(self) -> bool:
+        """True if anonymization is enabled in config."""
+        return self._config.enabled
+
     def process(self, image_path: Path) -> AnonymizationOutcome:
         """Read an image, run detectors, and apply blur.
 
@@ -321,11 +326,27 @@ class Anonymizer:
         if not self._detectors:
             return AnonymizationOutcome(status="no_models", face_count=0, plate_count=0, image=None)
 
-        import cv2
+        from street_viewer_360.image_io import load_bgr
 
-        image = cv2.imread(str(image_path), cv2.IMREAD_COLOR)
-        if image is None:
-            raise OSError(f"Failed to read image: {image_path}")
+        image = load_bgr(image_path)
+        return self.process_image(image)
+
+    def process_image(self, image: np.ndarray) -> AnonymizationOutcome:
+        """Run detectors and blur on a pre-loaded BGR image array.
+
+        Lets callers (e.g. the generator after horizon correction) avoid a
+        redundant decode of the source file.
+
+        Args:
+            image: HxWx3 uint8 BGR image. Modified in place when blurring runs.
+
+        Returns:
+            Outcome with the (possibly modified) image and detection counts.
+        """
+        if not self._config.enabled:
+            return AnonymizationOutcome(status="disabled", face_count=0, plate_count=0, image=None)
+        if not self._detectors:
+            return AnonymizationOutcome(status="no_models", face_count=0, plate_count=0, image=None)
 
         all_detections = self._run_detectors(image)
         all_detections = non_max_suppression(all_detections, self._config.nms_iou_threshold)

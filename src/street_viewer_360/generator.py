@@ -17,6 +17,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from street_viewer_360 import horizon as horizon_module
+from street_viewer_360 import image_io
 from street_viewer_360.anonymization import AnonymizationOutcome, Anonymizer, build_anonymizer
 from street_viewer_360.config import AppConfig
 from street_viewer_360.device import resolve_device
@@ -54,6 +56,7 @@ class GenerationResult:
     anonymized: int
     faces_blurred: int
     plates_blurred: int
+    horizon_corrected: int
 
 
 def _prepare_output_dir(output_dir: Path, *, overwrite: bool) -> None:
@@ -88,46 +91,112 @@ def _panorama_id(index: int) -> str:
     return f"pano_{index:06d}"
 
 
-def _output_image_name(pano_id: str, source: Path) -> str:
+def _output_image_name(pano_id: str, output_format: str) -> str:
     """Build the on-disk filename for an output image.
-
-    Source files like `GSAA0063.36P` (JPEG inside) are renamed to `.jpg` so
-    browsers can render them directly.
 
     Args:
         pano_id: Generated id, e.g. "pano_000001".
-        source: Path of the source image.
+        output_format: "jpeg" or "webp".
 
     Returns:
         Filename for the output image (no directory component).
     """
-    suffix = source.suffix.lower()
-    if suffix in {".jpg", ".jpeg", ".36p"}:
-        return f"{pano_id}.jpg"
-    if suffix == ".png":
-        return f"{pano_id}.png"
-    return f"{pano_id}{suffix}"
+    return f"{pano_id}{image_io.output_suffix(output_format)}"  # type: ignore[arg-type]
 
 
-def _write_output_image(
+def _process_one(
     source: Path,
-    destination: Path,
-    outcome: AnonymizationOutcome,
-) -> None:
-    """Write the output image either by saving the anonymized array or copying.
+    *,
+    anonymizer: Anonymizer,
+    decision: horizon_module.HorizonDecision,
+    interpolation: str,
+) -> AnonymizationOutcome:
+    """Load, optionally horizon-correct, then anonymize a single image.
+
+    Loading happens here (not inside Anonymizer.process) so the same in-memory
+    array can flow through both stages without an extra decode.
 
     Args:
         source: Path to the source image.
-        destination: Where to write the output.
-        outcome: Anonymization outcome; if status=="processed" its image is saved,
-            otherwise the source is copied verbatim.
-    """
-    if outcome.status == "processed" and outcome.image is not None:
-        from street_viewer_360.anonymization import save_image
+        anonymizer: Configured anonymizer (may have no detectors).
+        decision: Horizon correction plan for this image.
+        interpolation: Resampling kernel name for the rotation.
 
-        save_image(outcome.image, destination)
+    Returns:
+        AnonymizationOutcome. Its ``image`` is set whenever any in-memory
+        modification happened (horizon and/or blur), even if anonymization
+        itself was disabled.
+    """
+    if not decision.apply and not anonymizer.is_enabled:
+        return AnonymizationOutcome(status="disabled", face_count=0, plate_count=0, image=None)
+
+    image = image_io.load_bgr(source)
+
+    if decision.apply:
+        image = horizon_module.correct(
+            image,
+            pitch_deg=decision.pitch,
+            roll_deg=decision.roll,
+            heading_deg=decision.heading,
+            interpolation=interpolation,  # type: ignore[arg-type]
+        )
+
+    outcome = anonymizer.process_image(image)
+    # If anonymization didn't run but we rotated, surface the rotated array
+    # so it gets saved instead of the source being re-encoded from disk.
+    if outcome.image is None and decision.apply:
+        return AnonymizationOutcome(
+            status=outcome.status,
+            face_count=outcome.face_count,
+            plate_count=outcome.plate_count,
+            image=image,
+        )
+    return outcome
+
+
+def _write_output_image(
+    *,
+    source: Path,
+    destination: Path,
+    outcome: AnonymizationOutcome,
+    horizon_applied: bool,
+    output_format: str,
+    quality: int,
+    preserve_metadata: bool,
+) -> None:
+    """Persist the panorama in the configured output format.
+
+    When the pipeline produced an in-memory image (anonymization and/or
+    horizon correction), it is saved directly. Otherwise the source is
+    re-encoded so the chosen output format and quality still apply.
+
+    Args:
+        source: Original image path (for metadata carry-over).
+        destination: Output file path.
+        outcome: Anonymization outcome; its ``image`` is used when present.
+        horizon_applied: Whether horizon correction was performed.
+        output_format: "jpeg" or "webp".
+        quality: Encoder quality.
+        preserve_metadata: Carry EXIF + XMP from source.
+    """
+    if outcome.image is not None:
+        image_io.save(
+            outcome.image,
+            destination,
+            fmt=output_format,  # type: ignore[arg-type]
+            quality=quality,
+            source_path=source,
+            preserve_metadata=preserve_metadata,
+            zero_pose_metadata=horizon_applied,
+        )
     else:
-        shutil.copy2(source, destination)
+        image_io.copy_with_format(
+            source,
+            destination,
+            fmt=output_format,  # type: ignore[arg-type]
+            quality=quality,
+            preserve_metadata=preserve_metadata,
+        )
 
 
 def _build_panorama_entry(
@@ -135,6 +204,7 @@ def _build_panorama_entry(
     meta: ImageMetadata,
     image_rel_path: str,
     outcome: AnonymizationOutcome,
+    horizon_decision: horizon_module.HorizonDecision,
 ) -> dict[str, Any]:
     """Convert ImageMetadata + anonymization outcome to a JSON-serializable dict.
 
@@ -168,6 +238,13 @@ def _build_panorama_entry(
             "faces": outcome.face_count,
             "license_plates": outcome.plate_count,
         },
+    }
+    entry["horizon_correction"] = {
+        "applied": horizon_decision.apply,
+        "pitch": horizon_decision.pitch,
+        "roll": horizon_decision.roll,
+        "heading": horizon_decision.heading,
+        "reason": horizon_decision.reason,
     }
     return entry
 
@@ -218,6 +295,7 @@ def generate(
     anonymized_count = 0
     faces_total = 0
     plates_total = 0
+    horizon_count = 0
     next_index = 1
 
     for source in discovery.images:
@@ -237,25 +315,50 @@ def generate(
 
         pano_id = _panorama_id(next_index)
         next_index += 1
-        image_name = _output_image_name(pano_id, source)
+        image_name = _output_image_name(pano_id, config.output.format)
         image_rel_path = f"images/{image_name}"
 
+        decision = horizon_module.decide(
+            meta.gpano,
+            mode=config.horizon.mode,
+            min_angle_degrees=config.horizon.min_angle_degrees,
+            pitch_offset=config.horizon.pitch_offset_degrees,
+            roll_offset=config.horizon.roll_offset_degrees,
+            heading_offset=config.horizon.heading_offset_degrees,
+            override_metadata=config.horizon.override_metadata,
+        )
+
         try:
-            outcome = anonymizer.process(source)
+            outcome = _process_one(
+                source,
+                anonymizer=anonymizer,
+                decision=decision,
+                interpolation=config.horizon.interpolation,
+            )
         except Exception as exc:
-            logger.exception("Anonymization failed for %s", source)
-            failed.append({"source": str(source), "error": f"anonymization: {exc}"})
+            logger.exception("Processing failed for %s", source)
+            failed.append({"source": str(source), "error": f"processing: {exc}"})
             outcome = AnonymizationOutcome(status="no_models", face_count=0, plate_count=0, image=None)
 
         if outcome.status == "processed":
             anonymized_count += 1
             faces_total += outcome.face_count
             plates_total += outcome.plate_count
+        if decision.apply:
+            horizon_count += 1
 
         if not dry_run:
-            _write_output_image(source, images_dir / image_name, outcome)
+            _write_output_image(
+                source=source,
+                destination=images_dir / image_name,
+                outcome=outcome,
+                horizon_applied=decision.apply,
+                output_format=config.output.format,
+                quality=config.output.quality,
+                preserve_metadata=config.output.preserve_metadata,
+            )
 
-        panoramas.append(_build_panorama_entry(pano_id, meta, image_rel_path, outcome))
+        panoramas.append(_build_panorama_entry(pano_id, meta, image_rel_path, outcome, decision))
 
     metadata_doc = {
         "version": _METADATA_VERSION,
@@ -287,6 +390,15 @@ def generate(
             "anonymized_images": anonymized_count,
             "faces_blurred": faces_total,
             "plates_blurred": plates_total,
+        },
+        "horizon": {
+            "mode": config.horizon.mode,
+            "min_angle_degrees": config.horizon.min_angle_degrees,
+            "corrected_images": horizon_count,
+        },
+        "output": {
+            "format": config.output.format,
+            "quality": config.output.quality,
         },
         "config": {
             "recursive": config.recursive,
@@ -320,4 +432,5 @@ def generate(
         anonymized=anonymized_count,
         faces_blurred=faces_total,
         plates_blurred=plates_total,
+        horizon_corrected=horizon_count,
     )

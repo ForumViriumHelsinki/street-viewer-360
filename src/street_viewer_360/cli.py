@@ -112,6 +112,37 @@ def generate(
         float | None,
         typer.Option("--max-gap-seconds", help="Break the map polyline between consecutive panoramas with a larger time gap."),
     ] = None,
+    horizon_mode: Annotated[
+        str | None,
+        typer.Option(
+            "--horizon",
+            help="Horizon correction: auto | always | never. Default: auto (correct when GPano pose angles exceed the threshold).",
+        ),
+    ] = None,
+    no_horizon: Annotated[
+        bool,
+        typer.Option("--no-horizon", help="Shortcut for --horizon never."),
+    ] = False,
+    pitch_offset: Annotated[
+        float | None,
+        typer.Option("--pitch-offset", help="Extra pitch (degrees) added to GPano value when correcting."),
+    ] = None,
+    roll_offset: Annotated[
+        float | None,
+        typer.Option("--roll-offset", help="Extra roll (degrees) added to GPano value when correcting."),
+    ] = None,
+    heading_offset: Annotated[
+        float | None,
+        typer.Option("--heading-offset", help="Extra heading (degrees) added to GPano value when correcting."),
+    ] = None,
+    output_format: Annotated[
+        str | None,
+        typer.Option("--output-format", help="Output image format: jpeg | webp. Default: webp."),
+    ] = None,
+    output_quality: Annotated[
+        int | None,
+        typer.Option("--output-quality", help="Encoder quality (1-100)."),
+    ] = None,
     dry_run: Annotated[
         bool,
         typer.Option("--dry-run", help="Inspect inputs without writing output."),
@@ -148,6 +179,28 @@ def generate(
     if max_gap_seconds is not None:
         cfg.path.max_gap_seconds = max_gap_seconds
 
+    if no_horizon:
+        cfg.horizon.mode = "never"
+    elif horizon_mode is not None:
+        if horizon_mode not in {"auto", "always", "never"}:
+            logger.error("--horizon must be one of: auto, always, never")
+            raise typer.Exit(code=2)
+        cfg.horizon.mode = horizon_mode  # type: ignore[assignment]
+    if pitch_offset is not None:
+        cfg.horizon.pitch_offset_degrees = pitch_offset
+    if roll_offset is not None:
+        cfg.horizon.roll_offset_degrees = roll_offset
+    if heading_offset is not None:
+        cfg.horizon.heading_offset_degrees = heading_offset
+
+    if output_format is not None:
+        if output_format not in {"jpeg", "webp"}:
+            logger.error("--output-format must be one of: jpeg, webp")
+            raise typer.Exit(code=2)
+        cfg.output.format = output_format  # type: ignore[assignment]
+    if output_quality is not None:
+        cfg.output.quality = output_quality
+
     try:
         result = run_generate(input_dir, cfg, dry_run=dry_run)
     except FileNotFoundError as exc:
@@ -178,6 +231,8 @@ def generate(
         typer.echo(
             f"  anonymized:         {result.anonymized} (faces={result.faces_blurred}, plates={result.plates_blurred})"
         )
+    if result.horizon_corrected:
+        typer.echo(f"  horizon corrected:  {result.horizon_corrected}")
 
     if result.included == 0:
         logger.warning("No panoramas were included in the output.")

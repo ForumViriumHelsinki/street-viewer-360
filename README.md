@@ -19,7 +19,7 @@ uv sync
 uv run pre-commit install
 ```
 
-Anonymization support (faces + license plates) needs heavy ML dependencies (torch, ultralytics, opencv-python). Install them as an optional extra:
+Anonymization support (faces + license plates) needs heavy ML dependencies (torch, ultralytics). Install them as an optional extra:
 
 ```bash
 uv sync --extra anonymization
@@ -96,8 +96,26 @@ If anonymization is enabled but no model paths are configured, the generator log
 --face-model PATH         YOLOv8 face-detection model (.pt)
 --plate-model PATH        YOLOv8 license-plate-detection model (.pt)
 --no-anonymization        Skip anonymization entirely
+--horizon MODE            auto | always | never (default auto)
+--no-horizon              Shortcut for --horizon never
+--pitch-offset FLOAT      Extra pitch (deg) applied during horizon correction
+--roll-offset FLOAT       Extra roll (deg)
+--heading-offset FLOAT    Extra heading (deg)
+--output-format FORMAT    jpeg | webp (default webp)
+--output-quality INT      Encoder quality 1-100 (default 90)
 --dry-run                 Inspect without writing output
 ```
+
+### Horizon correction
+
+Equirectangular panoramas from 360 cameras are rarely level. Street Viewer 360
+reads the XMP `GPano:PosePitchDegrees`, `PoseRollDegrees`, and `PoseHeadingDegrees`
+tags written by GoPro MAX 2 and compatible cameras and rotates the panorama
+in-place so the horizon is level. By default this happens automatically when the
+combined tilt exceeds `horizon.min_angle_degrees` (0.2°). Disable with
+`--no-horizon`, or force on/off via `--horizon always|never`. After correction
+the `Pose*Degrees` tags in the output are reset to 0.0 so downstream viewers do
+not re-rotate.
 
 ## Output layout
 

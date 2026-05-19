@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
@@ -60,6 +60,30 @@ class MetadataConfig(BaseModel):
     timezone: str = "local"
 
 
+class HorizonConfig(BaseModel):
+    """Horizon-correction settings for equirectangular panoramas."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    mode: Literal["auto", "always", "never"] = "auto"
+    min_angle_degrees: float = 0.2
+    interpolation: Literal["nearest", "bilinear", "bicubic"] = "bilinear"
+    pitch_offset_degrees: float = 0.0
+    roll_offset_degrees: float = 0.0
+    heading_offset_degrees: float = 0.0
+    override_metadata: bool = False
+
+
+class OutputConfig(BaseModel):
+    """Output image format and quality settings."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    format: Literal["jpeg", "webp"] = "webp"
+    quality: int = Field(default=90, ge=1, le=100)
+    preserve_metadata: bool = True
+
+
 class ViewerConfig(BaseModel):
     """Panorama viewer (Pannellum) view-limit settings."""
 
@@ -107,6 +131,8 @@ class AppConfig(BaseModel):
     overwrite: bool = False
     device: Device = "auto"
     anonymization: AnonymizationConfig = Field(default_factory=AnonymizationConfig)
+    horizon: HorizonConfig = Field(default_factory=HorizonConfig)
+    output: OutputConfig = Field(default_factory=OutputConfig)
     metadata: MetadataConfig = Field(default_factory=MetadataConfig)
     path: PathConfig = Field(default_factory=PathConfig)
     viewer: ViewerConfig = Field(default_factory=ViewerConfig)

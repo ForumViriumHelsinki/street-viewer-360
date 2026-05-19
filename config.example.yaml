@@ -84,6 +84,49 @@ anonymization:
   #     merged into one: raise to 0.55-0.65.
   nms_iou_threshold: 0.45
 
+horizon:
+  # Equirectangular panoramas captured with a hand-held / vehicle-mounted 360
+  # camera are rarely perfectly level. GoPro MAX 2 (and similar) writes the
+  # capture orientation into XMP GPano PoseHeading/Pitch/RollDegrees. When we
+  # have those, we can rotate the panorama so the horizon is level.
+  #
+  # Modes:
+  #   auto   - rotate when |max(pose angles)| >= min_angle_degrees
+  #   always - rotate whenever any pose data (or manual offsets) is present
+  #   never  - do not rotate
+  mode: auto
+
+  # Threshold for "auto" mode. Below this all-pose-angles are treated as noise
+  # and the image is passed through untouched (saves CPU and a tiny amount of
+  # resampling loss). 0.2 is conservative; raise to 1.0 if you want only
+  # noticeable tilts corrected.
+  min_angle_degrees: 0.2
+
+  # Resampling kernel. bilinear is fast and visually indistinguishable from
+  # bicubic on photographic content; nearest is only useful for debug.
+  interpolation: bilinear  # nearest | bilinear | bicubic
+
+  # Manual offsets in degrees, added to the values read from XMP. Use these
+  # for cameras that don't write Pose tags, or to nudge a known systematic
+  # mount offset. Combine with override_metadata: true to ignore XMP entirely.
+  pitch_offset_degrees: 0.0
+  roll_offset_degrees: 0.0
+  heading_offset_degrees: 0.0
+  override_metadata: false
+
+output:
+  # Output image format and quality.
+  #   webp - ~40-60% smaller than JPEG at visually equivalent quality. Default.
+  #   jpeg - maximum compatibility. Pannellum, browsers, and image viewers all
+  #          read it without question.
+  format: webp
+  quality: 90
+
+  # Carry EXIF + XMP from the source to the output (GPS, camera model, GPano).
+  # When horizon correction is applied, the GPano Pose angles in the output
+  # are reset to 0.0 so downstream viewers don't try to re-rotate.
+  preserve_metadata: true
+
 metadata:
   include_without_gps: false
   timezone: "local"

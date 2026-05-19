@@ -14,8 +14,26 @@ from pathlib import Path
 from typing import Any
 
 import exifread
+from PIL import Image
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class GPanoMetadata:
+    """Subset of XMP GPano tags relevant for horizon correction.
+
+    Attributes:
+        projection_type: e.g. "equirectangular", or None if missing.
+        pose_pitch: Camera pitch in degrees (positive = nose up), or None.
+        pose_roll: Camera roll in degrees (positive = right wing down), or None.
+        pose_heading: Camera heading in degrees [0, 360), or None.
+    """
+
+    projection_type: str | None
+    pose_pitch: float | None
+    pose_roll: float | None
+    pose_heading: float | None
 
 
 @dataclass(frozen=True)
@@ -32,6 +50,7 @@ class ImageMetadata:
         height: Image pixel height, if obtainable from EXIF.
         camera_make: Camera manufacturer, or None.
         camera_model: Camera model, or None.
+        gpano: XMP GPano subset (pose angles, projection type), or None.
     """
 
     source_path: Path
@@ -43,6 +62,7 @@ class ImageMetadata:
     height: int | None
     camera_make: str | None
     camera_model: str | None
+    gpano: GPanoMetadata | None
 
 
 def _to_float(value: Any) -> float | None:
@@ -114,6 +134,77 @@ def _normalize_heading(value: float | None) -> float | None:
     return value % 360.0
 
 
+def _parse_float(raw: Any) -> float | None:
+    """Parse a value as float, returning None on failure or non-string input."""
+    if not isinstance(raw, str):
+        return None
+    try:
+        return float(raw)
+    except ValueError:
+        return None
+
+
+def _xmp_description(image_path: Path) -> dict[str, Any] | None:
+    """Return the merged ``rdf:Description`` dict from an image's XMP packet.
+
+    Uses Pillow's ``Image.getxmp()`` (backed by defusedxml) which works for
+    both JPEG and WebP and strips namespace prefixes. When multiple
+    Description blocks exist they are merged left-to-right.
+
+    Args:
+        image_path: Source image path.
+
+    Returns:
+        Flat dict of XMP attributes, or None if no XMP is present.
+    """
+    try:
+        with Image.open(image_path) as img:
+            xmp = img.getxmp()
+    except (OSError, ValueError) as exc:
+        logger.debug("XMP read failed for %s: %s", image_path, exc)
+        return None
+    if not xmp:
+        return None
+    description = xmp.get("xmpmeta", {}).get("RDF", {}).get("Description")
+    if description is None:
+        return None
+    if isinstance(description, list):
+        merged: dict[str, Any] = {}
+        for item in description:
+            if isinstance(item, dict):
+                merged.update(item)
+        return merged
+    if isinstance(description, dict):
+        return description
+    return None
+
+
+def extract_gpano(image_path: Path) -> GPanoMetadata | None:
+    """Extract the XMP GPano subset needed for horizon correction.
+
+    Args:
+        image_path: Source image path.
+
+    Returns:
+        GPanoMetadata if any GPano tag was found, otherwise None.
+    """
+    description = _xmp_description(image_path)
+    if description is None:
+        return None
+    projection = description.get("ProjectionType")
+    pitch = _parse_float(description.get("PosePitchDegrees"))
+    roll = _parse_float(description.get("PoseRollDegrees"))
+    heading = _parse_float(description.get("PoseHeadingDegrees"))
+    if projection is None and pitch is None and roll is None and heading is None:
+        return None
+    return GPanoMetadata(
+        projection_type=projection if isinstance(projection, str) else None,
+        pose_pitch=pitch,
+        pose_roll=roll,
+        pose_heading=heading,
+    )
+
+
 def extract_metadata(image_path: Path) -> ImageMetadata:
     """Read EXIF tags from a single image and return normalized metadata.
 
@@ -168,4 +259,5 @@ def extract_metadata(image_path: Path) -> ImageMetadata:
         height=height,
         camera_make=camera_make,
         camera_model=camera_model,
+        gpano=extract_gpano(image_path),
     )
