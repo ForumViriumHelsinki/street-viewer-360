@@ -103,6 +103,7 @@ If anonymization is enabled but no model paths are configured, the generator log
 --heading-offset FLOAT    Extra heading (deg)
 --output-format FORMAT    jpeg | webp (default webp)
 --output-quality INT      Encoder quality 1-100 (default 90)
+--webp-method INT         WebP encoder effort 0-6 (default 4)
 --dry-run                 Inspect without writing output
 ```
 

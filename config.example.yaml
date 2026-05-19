@@ -122,6 +122,14 @@ output:
   format: webp
   quality: 90
 
+  # WebP encoder effort 0..6. Higher = smaller file, slower encoding.
+  # Benchmarks on an 8K panorama at quality 90:
+  #   method=0: ~500 ms, 3.4 MB    method=4: ~1300 ms, 3.1 MB (default)
+  #   method=2: ~700 ms, 3.4 MB    method=6: ~2500 ms, 2.9 MB
+  # Going above 4 buys very little file-size reduction for double the time;
+  # going below 2 trades a noticeable size increase for marginal speed.
+  webp_method: 4
+
   # Carry EXIF + XMP from the source to the output (GPS, camera model, GPano).
   # When horizon correction is applied, the GPano Pose angles in the output
   # are reset to 0.0 so downstream viewers don't try to re-rotate.

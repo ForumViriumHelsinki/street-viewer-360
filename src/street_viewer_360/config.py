@@ -81,6 +81,7 @@ class OutputConfig(BaseModel):
 
     format: Literal["jpeg", "webp"] = "webp"
     quality: int = Field(default=90, ge=1, le=100)
+    webp_method: int = Field(default=4, ge=0, le=6)
     preserve_metadata: bool = True
 
 

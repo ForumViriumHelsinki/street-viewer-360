@@ -143,6 +143,13 @@ def generate(
         int | None,
         typer.Option("--output-quality", help="Encoder quality (1-100)."),
     ] = None,
+    webp_method: Annotated[
+        int | None,
+        typer.Option(
+            "--webp-method",
+            help="WebP encoder effort 0..6 (higher = smaller file, slower). Default 4.",
+        ),
+    ] = None,
     dry_run: Annotated[
         bool,
         typer.Option("--dry-run", help="Inspect inputs without writing output."),
@@ -200,6 +207,11 @@ def generate(
         cfg.output.format = output_format  # type: ignore[assignment]
     if output_quality is not None:
         cfg.output.quality = output_quality
+    if webp_method is not None:
+        if not 0 <= webp_method <= 6:
+            logger.error("--webp-method must be in 0..6")
+            raise typer.Exit(code=2)
+        cfg.output.webp_method = webp_method
 
     try:
         result = run_generate(input_dir, cfg, dry_run=dry_run)

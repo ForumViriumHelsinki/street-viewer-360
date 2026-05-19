@@ -93,6 +93,7 @@ def save(
     *,
     fmt: OutputFormat,
     quality: int,
+    webp_method: int = 4,
     source_path: Path | None = None,
     preserve_metadata: bool = True,
     zero_pose_metadata: bool = False,
@@ -109,6 +110,8 @@ def save(
         destination: Output file path.
         fmt: "jpeg" or "webp".
         quality: 1-100. Mapped to Pillow's ``quality`` parameter.
+        webp_method: WebP encoder effort 0..6 (higher = smaller file, slower).
+            Ignored for JPEG.
         source_path: Original file for metadata carry-over.
         preserve_metadata: Embed EXIF + XMP from source.
         zero_pose_metadata: Reset GPano pose angles to zero in the embedded XMP.
@@ -132,8 +135,7 @@ def save(
     if fmt == "jpeg":
         pil_image.save(destination, "JPEG", **save_kwargs)
     elif fmt == "webp":
-        # method=6 = slowest/best compression. Worth it for one-off generation.
-        save_kwargs["method"] = 6
+        save_kwargs["method"] = webp_method
         pil_image.save(destination, "WEBP", **save_kwargs)
     else:  # pragma: no cover - guarded by Literal type
         raise ValueError(f"Unsupported output format: {fmt}")
@@ -145,6 +147,7 @@ def copy_with_format(
     *,
     fmt: OutputFormat,
     quality: int,
+    webp_method: int = 4,
     preserve_metadata: bool = True,
 ) -> None:
     """Re-encode an untouched source file to the requested output format.
@@ -158,6 +161,7 @@ def copy_with_format(
         destination: Output path.
         fmt: Output format.
         quality: Encoder quality.
+        webp_method: WebP encoder effort 0..6.
         preserve_metadata: Carry EXIF + XMP from the source.
     """
     image = load_bgr(source_path)
@@ -166,6 +170,7 @@ def copy_with_format(
         destination,
         fmt=fmt,
         quality=quality,
+        webp_method=webp_method,
         source_path=source_path,
         preserve_metadata=preserve_metadata,
         zero_pose_metadata=False,

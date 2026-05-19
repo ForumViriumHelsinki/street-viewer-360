@@ -162,6 +162,7 @@ def _write_output_image(
     horizon_applied: bool,
     output_format: str,
     quality: int,
+    webp_method: int,
     preserve_metadata: bool,
 ) -> None:
     """Persist the panorama in the configured output format.
@@ -185,6 +186,7 @@ def _write_output_image(
             destination,
             fmt=output_format,  # type: ignore[arg-type]
             quality=quality,
+            webp_method=webp_method,
             source_path=source,
             preserve_metadata=preserve_metadata,
             zero_pose_metadata=horizon_applied,
@@ -195,6 +197,7 @@ def _write_output_image(
             destination,
             fmt=output_format,  # type: ignore[arg-type]
             quality=quality,
+            webp_method=webp_method,
             preserve_metadata=preserve_metadata,
         )
 
@@ -355,6 +358,7 @@ def generate(
                 horizon_applied=decision.apply,
                 output_format=config.output.format,
                 quality=config.output.quality,
+                webp_method=config.output.webp_method,
                 preserve_metadata=config.output.preserve_metadata,
             )
 
