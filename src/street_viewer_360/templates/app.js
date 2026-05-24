@@ -2,7 +2,7 @@
 (function () {
   "use strict";
 
-  var FIT_MAX_ZOOM = 19;
+  var FIT_MAX_ZOOM = 22;
   var MARKER_COLOR = "#2563eb";
   var MARKER_COLOR_ACTIVE = "#dc2626";
   var MARKER_RADIUS = 6;
@@ -273,8 +273,20 @@
       defaultLayer = baseLayers[firstName];
     }
     defaultLayer.addTo(map);
-    if (Object.keys(baseLayers).length > 1) {
-      L.control.layers(baseLayers, {}, { position: "topright" }).addTo(map);
+
+    var overlays = {};
+    (metadata.tile_overlays || []).forEach(function (overlay) {
+      var opts = { attribution: overlay.attribution || "" };
+      if (typeof overlay.min_zoom === "number") opts.minZoom = overlay.min_zoom;
+      if (typeof overlay.max_zoom === "number") opts.maxNativeZoom = overlay.max_zoom;
+      opts.maxZoom = FIT_MAX_ZOOM;
+      var tile = L.tileLayer(overlay.url, opts);
+      overlays[overlay.name] = tile;
+      tile.addTo(map);
+    });
+
+    if (Object.keys(baseLayers).length > 1 || Object.keys(overlays).length > 0) {
+      L.control.layers(baseLayers, overlays, { position: "topright", collapsed: false }).addTo(map);
     }
 
     var withCoords = (metadata.panoramas || []).filter(function (p) {

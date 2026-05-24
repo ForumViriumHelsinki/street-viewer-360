@@ -48,6 +48,97 @@ def _version_callback(value: bool) -> None:
         raise typer.Exit
 
 
+def _derive_layer_name(directory: Path) -> str:
+    """Build a display name from a tile directory's basename.
+
+    Replaces underscores with spaces and capitalizes the first character.
+
+    Args:
+        directory: Tile directory path.
+
+    Returns:
+        Human-friendly layer name.
+    """
+    base = directory.name.replace("_", " ").strip()
+    if not base:
+        return "Layer"
+    return base[0].upper() + base[1:]
+
+
+def _parse_tile_spec(spec: str) -> tuple[Path, str]:
+    """Parse a ``PATH[:NAME]`` tile layer specification.
+
+    If ``PATH`` itself exists as a directory the whole spec is treated as a path
+    (so colons inside paths still work). Otherwise the last ``:`` separates the
+    optional display name.
+
+    Args:
+        spec: Raw CLI argument value.
+
+    Returns:
+        Tuple of (resolved tile directory path, display name).
+    """
+    direct = Path(spec).expanduser()
+    if direct.is_dir():
+        return direct, _derive_layer_name(direct)
+    if ":" in spec:
+        path_part, name_part = spec.rsplit(":", 1)
+        path = Path(path_part).expanduser()
+        name = name_part.strip() or _derive_layer_name(path)
+        return path, name
+    return direct, _derive_layer_name(direct)
+
+
+def _slugify_layer(name: str, used: set[str]) -> str:
+    """Build a filesystem-safe unique slug for a tile layer directory.
+
+    Args:
+        name: Source name (typically the source directory's basename).
+        used: Slugs already taken; the returned slug is guaranteed to be unique
+            against this set.
+
+    Returns:
+        A lowercase, hyphen-separated slug.
+    """
+    base = "".join(c.lower() if c.isalnum() else "-" for c in name).strip("-")
+    while "--" in base:
+        base = base.replace("--", "-")
+    if not base:
+        base = "layer"
+    slug = base
+    counter = 2
+    while slug in used:
+        slug = f"{base}-{counter}"
+        counter += 1
+    used.add(slug)
+    return slug
+
+
+def _normalize_tile_layers(tile_specs: list[str] | None) -> list[dict[str, Any]] | None:
+    """Validate ``--tiles`` arguments and prepare them for the frontend.
+
+    Args:
+        tile_specs: Raw ``PATH[:NAME]`` strings from the CLI.
+
+    Returns:
+        List of dicts with ``src``, ``name``, and ``slug`` keys, or None when no
+        tile layers were supplied.
+    """
+    if not tile_specs:
+        return None
+
+    layers: list[dict[str, Any]] = []
+    used_slugs: set[str] = set()
+    for spec in tile_specs:
+        src, name = _parse_tile_spec(spec)
+        if not src.is_dir():
+            logger.error("Tile directory not found: %s", src)
+            raise typer.Exit(code=2)
+        slug = _slugify_layer(src.name, used_slugs)
+        layers.append({"src": src, "name": name, "slug": slug})
+    return layers
+
+
 def _normalize_logo_paths(logo_paths: list[Path] | None) -> list[Path] | None:
     """Validate and normalize logo paths before processing starts.
 
@@ -185,6 +276,17 @@ def generate(
         list[Path] | None,
         typer.Option("--logo", help="Logo image to show in the header. Repeat to show multiple logos in order."),
     ] = None,
+    tiles: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--tiles",
+            help=(
+                "Custom raster tile directory to serve as an overlay. Format: PATH[:NAME]. "
+                "Repeat for multiple overlays. NAME defaults to the directory name (underscores "
+                "become spaces, first letter capitalized)."
+            ),
+        ),
+    ] = None,
     dry_run: Annotated[
         bool,
         typer.Option("--dry-run", help="Inspect inputs without writing output."),
@@ -248,9 +350,10 @@ def generate(
             raise typer.Exit(code=2)
         cfg.output.webp_method = webp_method
     logo_paths = _normalize_logo_paths(logo)
+    tile_layers = _normalize_tile_layers(tiles)
 
     try:
-        result = run_generate(input_dir, cfg, dry_run=dry_run, logo_paths=logo_paths)
+        result = run_generate(input_dir, cfg, dry_run=dry_run, logo_paths=logo_paths, tile_layers=tile_layers)
     except FileNotFoundError as exc:
         logger.error("%s", exc)
         raise typer.Exit(code=2) from exc
@@ -305,6 +408,17 @@ def refresh_frontend(
         list[Path] | None,
         typer.Option("--logo", help="Logo image to show in the header. Repeat to show multiple logos in order."),
     ] = None,
+    tiles: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--tiles",
+            help=(
+                "Custom raster tile directory to serve as an overlay. Format: PATH[:NAME]. "
+                "Repeat for multiple overlays. NAME defaults to the directory name (underscores "
+                "become spaces, first letter capitalized)."
+            ),
+        ),
+    ] = None,
     max_gap_meters: Annotated[
         float | None,
         typer.Option(
@@ -351,6 +465,19 @@ def refresh_frontend(
         "min_hfov": cfg.viewer.min_hfov,
         "max_hfov": cfg.viewer.max_hfov,
     }
+
+    tile_layers = _normalize_tile_layers(tiles)
+
+    try:
+        from street_viewer_360.frontend import copy_tile_layers
+
+        if tile_layers is not None:
+            overlays = copy_tile_layers(tile_layers, output_dir)
+            metadata_doc["tile_overlays"] = overlays
+    except (FileNotFoundError, ValueError) as exc:
+        logger.error("%s", exc)
+        raise typer.Exit(code=2) from exc
+
     metadata_path.write_text(json.dumps(metadata_doc, indent=2, ensure_ascii=False), encoding="utf-8")
 
     try:

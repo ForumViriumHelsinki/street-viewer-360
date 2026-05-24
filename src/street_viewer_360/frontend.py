@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_TITLE = "Street Viewer 360"
 _LOGO_EXTENSIONS = {".gif", ".jpeg", ".jpg", ".png", ".svg", ".webp"}
+_TILE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
 
 
 def _jinja_env() -> Environment:
@@ -99,6 +100,88 @@ def _copy_logos(logo_paths: list[Path] | None, assets_dir: Path) -> list[dict[st
         logos.append({"src": f"assets/logos/{filename}", "alt": alt_text})
 
     return logos
+
+
+def _inspect_tile_tree(src: Path) -> tuple[int, int, str]:
+    """Determine zoom range and tile file extension for an XYZ tile directory.
+
+    Scans top-level numeric subdirectories for ``z`` levels and samples any tile
+    to detect the file extension.
+
+    Args:
+        src: Tile directory root (expected layout: ``{z}/{x}/{y}.<ext>``).
+
+    Returns:
+        Tuple of (min_zoom, max_zoom, extension without leading dot).
+
+    Raises:
+        ValueError: No numeric zoom directories or no tile files were found.
+    """
+    zoom_levels = sorted(int(d.name) for d in src.iterdir() if d.is_dir() and d.name.isdigit())
+    if not zoom_levels:
+        raise ValueError(f"No numeric zoom directories under {src}; expected XYZ layout {{z}}/{{x}}/{{y}}.")
+
+    sample_tile: Path | None = None
+    for z in zoom_levels:
+        for tile in (src / str(z)).rglob("*"):
+            if tile.is_file() and tile.suffix.lower() in _TILE_EXTENSIONS:
+                sample_tile = tile
+                break
+        if sample_tile is not None:
+            break
+    if sample_tile is None:
+        raise ValueError(f"No tile files with a supported extension found under {src}.")
+
+    return zoom_levels[0], zoom_levels[-1], sample_tile.suffix.lower().lstrip(".")
+
+
+def copy_tile_layers(layers: list[dict[str, object]], output_dir: Path) -> list[dict[str, object]]:
+    """Copy custom tile directories under ``output_dir/tiles`` and build overlay metadata.
+
+    The destination ``tiles/`` directory is fully replaced on every call so stale
+    layers from previous runs are removed.
+
+    Args:
+        layers: Entries shaped ``{"src": Path, "name": str, "slug": str}``.
+        output_dir: Generated package root.
+
+    Returns:
+        Overlay metadata entries (``name``, ``url``, ``min_zoom``, ``max_zoom``)
+        ready to be written into ``metadata.json``.
+
+    Raises:
+        FileNotFoundError: A source directory is missing.
+        ValueError: A source directory does not look like an XYZ tile tree.
+    """
+    tiles_root = output_dir / "tiles"
+    if tiles_root.exists():
+        shutil.rmtree(tiles_root)
+    if not layers:
+        return []
+
+    tiles_root.mkdir(parents=True, exist_ok=True)
+    overlays: list[dict[str, object]] = []
+    for layer in layers:
+        src = Path(layer["src"])  # type: ignore[arg-type]
+        if not src.is_dir():
+            raise FileNotFoundError(f"Tile directory not found: {src}")
+        slug = str(layer["slug"])
+        name = str(layer["name"])
+        min_zoom, max_zoom, ext = _inspect_tile_tree(src)
+
+        dest = tiles_root / slug
+        shutil.copytree(src, dest)
+        logger.info("Copied tile layer %r (%s) to %s [z=%d..%d, .%s]", name, src, dest, min_zoom, max_zoom, ext)
+
+        overlays.append(
+            {
+                "name": name,
+                "url": f"tiles/{slug}/{{z}}/{{x}}/{{y}}.{ext}",
+                "min_zoom": min_zoom,
+                "max_zoom": max_zoom,
+            }
+        )
+    return overlays
 
 
 def write_frontend(

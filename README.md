@@ -109,6 +109,7 @@ If anonymization is enabled but no model paths are configured, the generator log
 --output-quality INT      Encoder quality 1-100 (default 90)
 --webp-method INT         WebP encoder effort 0-6 (default 4)
 --logo PATH               Header logo image; repeat to show multiple logos
+--tiles PATH[:NAME]       Custom raster tile overlay; repeat for multiple layers
 --dry-run                 Inspect without writing output
 ```
 
@@ -127,6 +128,51 @@ combined tilt exceeds `horizon.min_angle_degrees` (0.2°). Disable with
 the `Pose*Degrees` tags in the output are reset to 0.0 so downstream viewers do
 not re-rotate.
 
+### Custom tile overlays
+
+Per-project raster tile layers (e.g. drone orthophotos, cadastral overlays) can
+be added to the map without modifying the config. Pass `--tiles PATH[:NAME]` to
+either `generate` or `refresh-frontend`, repeating the flag for multiple layers:
+
+```bash
+street-viewer-360 generate -i ./panos \
+  --tiles ./tiles/orto_2024:"Orthophoto 2024" \
+  --tiles ./tiles/kantakartta
+```
+
+The tile directory must follow the XYZ layout (`{z}/{x}/{y}.<ext>`, where
+`<ext>` is `.png`, `.jpg`, or `.webp`). It is copied into `output/tiles/<slug>/`
+and registered in `metadata.json` as `tile_overlays`. Each overlay is shown on
+top of the active base layer, **enabled by default**, and toggleable from the
+Leaflet layer control. If `:NAME` is omitted, the display name is derived from
+the directory name (underscores become spaces, first letter capitalized — e.g.
+`orto_2024` → `Orto 2024`).
+
+Zoom range and tile file extension are auto-detected from the directory tree.
+
+#### Producing tiles from a GeoTIFF (WebODM orthophoto)
+
+Use `gdal2tiles.py` from GDAL (`brew install gdal`). WebP is recommended for
+drone orthophotos because it preserves the alpha channel (transparent edges
+where the orthophoto has no data) and produces ~30–50 % smaller files than JPEG
+at the same visual quality:
+
+```bash
+gdal2tiles.py --xyz -z 14-22 -r bilinear --processes 4 -w none \
+  --tiledriver=WEBP --webp-quality=75 \
+  orthophoto.tif ./tiles/orto_2024
+```
+
+Notes:
+- `--xyz` produces standard XYZ tiles (same convention as OpenStreetMap and
+  Leaflet). Without it gdal2tiles writes TMS, which has an inverted Y axis.
+- Adjust the zoom range to the area: `-z 18-22` is usually enough for a drone
+  ortho. Add a lower bound (e.g. `14`) if you want the overlay to also appear
+  when zoomed further out.
+- JPEG (`--tiledriver=JPEG`) is only worthwhile if the source has no
+  transparent areas — drone orthophotos almost always do, so WebP is the safer
+  default.
+
 ## Output layout
 
 ```text
@@ -140,6 +186,8 @@ dist-output/
   assets/
     app.js  styles.css
     leaflet/  pannellum/
+  tiles/           # only when --tiles was used
+    <slug>/{z}/{x}/{y}.<ext>
 ```
 
 ## Development

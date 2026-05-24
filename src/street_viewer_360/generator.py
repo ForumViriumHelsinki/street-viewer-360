@@ -23,7 +23,7 @@ from street_viewer_360.anonymization import AnonymizationOutcome, Anonymizer, bu
 from street_viewer_360.config import AppConfig
 from street_viewer_360.device import resolve_device
 from street_viewer_360.discovery import discover_images
-from street_viewer_360.frontend import write_frontend
+from street_viewer_360.frontend import copy_tile_layers, write_frontend
 from street_viewer_360.metadata import ImageMetadata, extract_metadata
 
 logger = logging.getLogger(__name__)
@@ -259,6 +259,7 @@ def generate(
     dry_run: bool = False,
     anonymizer: Anonymizer | None = None,
     logo_paths: list[Path] | None = None,
+    tile_layers: list[dict[str, Any]] | None = None,
 ) -> GenerationResult:
     """Run the full generate pipeline.
 
@@ -270,6 +271,8 @@ def generate(
         anonymizer: Optional pre-built Anonymizer. When None, one is constructed
             from `config.anonymization`. Useful for tests.
         logo_paths: Optional logo image paths to show in the generated header.
+        tile_layers: Optional custom raster tile overlays, each shaped
+            ``{"src": Path, "name": str, "slug": str}``.
 
     Returns:
         GenerationResult summarizing the run.
@@ -310,7 +313,7 @@ def generate(
             logger.exception("Failed to extract metadata from %s", source)
             failed.append({"source": str(source), "error": str(exc)})
             continue
-
+        logger.info("Extracted metadata from %s", source)
         has_gps = meta.lat is not None and meta.lon is not None
         if not has_gps:
             logger.warning("No GPS coordinates for %s", source.name)
@@ -366,11 +369,16 @@ def generate(
 
         panoramas.append(_build_panorama_entry(pano_id, meta, image_rel_path, outcome, decision))
 
+    tile_overlays: list[dict[str, Any]] = []
+    if not dry_run and tile_layers:
+        tile_overlays = copy_tile_layers(tile_layers, output_dir)  # type: ignore[arg-type]
+
     metadata_doc = {
         "version": _METADATA_VERSION,
         "generated_at": datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z"),
         "default_zoom": config.default_zoom,
         "map_layers": [layer.model_dump() for layer in config.map_layers],
+        "tile_overlays": tile_overlays,
         "path": {
             "max_gap_meters": config.path.max_gap_meters,
             "max_gap_seconds": config.path.max_gap_seconds,
